@@ -104,6 +104,11 @@ $ pip install ibm_db_django
 
  * ibm-db_django discuss : http://groups.google.com/group/ibm_db
  * ibm-db issues reports: https://github.com/ibmdb/python-ibmdb/issues
- * ibm-db developers: opendev@us.ibm.com
 
+# Contributing to the ibm_db-django python project
+
+  See [CONTRIBUTING](https://github.com/ibmdb/python-ibmdb-django/blob/master/contributing/CONTRIBUTING.md)
+
+  The developer sign-off should include the reference to the DCO in remarks(example below):
+  DCO 1.1 Signed-off-by: Random J Developer <random@developer.org>
 
