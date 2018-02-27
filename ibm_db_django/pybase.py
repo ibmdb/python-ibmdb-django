@@ -152,6 +152,7 @@ class DB2CursorWrapper( Database.Cursor ):
                 
     # Over-riding this method to modify SQLs which contains format parameter to qmark. 
     def execute( self, operation, parameters = () ):
+        operation = str(operation)
         try:
             if operation.find('ALTER TABLE') == 0 and getattr(self.connection, dbms_name) != 'DB2':
                 doReorg = 1

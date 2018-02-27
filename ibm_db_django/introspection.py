@@ -245,13 +245,8 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
 
         if table_type != 'X':
             cursor.execute( "SELECT * FROM %s FETCH FIRST 1 ROWS ONLY" % qn( table_name ) )
-            if djangoVersion < (1, 6):
-                for desc in cursor.description:
-                    description.append( [ desc[0].lower(), ] + desc[1:] )
-            else:
-                for desc in cursor.description:
-                    description.append(FieldInfo(*[desc[0].lower(), ] + desc[1:]))
-        
+            for desc in cursor.description:
+                description.append( [ desc[0].lower(), ] + desc[1:] )
         return description
 
     def get_constraints(self, cursor, table_name):
@@ -337,3 +332,14 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                     continue
                 constraints[index['INDEX_NAME']]['columns'].append(index['COLUMN_NAME'].lower())
             return constraints
+
+    def get_sequences(self,cursor, table_name,table_fields=()):
+        from django.apps import apps
+        from django.db import models
+
+        seq_list=[]
+        for f in table_fields:
+            if(isinstance(f,models.AutoField)):
+               seq_list.append({'table':table_name, 'column': f.column})
+               break
+        return seq_list

@@ -116,10 +116,13 @@ class DatabaseOperations ( BaseDatabaseOperations ):
             return 'POWER(%s, %s)' % ( sub_expressions[0], sub_expressions[1] )
         elif operator == '-':
             if( djangoVersion[0:2] >= ( 1, 8 ) ):
-                str= sub_expressions[1]
-                sub_expressions[1]=str.replace('+', '-')
+                strr= str(sub_expressions[1])
+                sub_expressions[1]=strr.replace('+', '-')
             return super( DatabaseOperations, self ).combine_expression( operator, sub_expressions )
         else:
+            if( djangoVersion[0:2] >= (1 , 8)):
+                strr= str(sub_expressions[1])
+                sub_expressions[1]=strr.replace('+', '-')
             return super( DatabaseOperations, self ).combine_expression( operator, sub_expressions )
     
     if( djangoVersion[0:2] >= ( 1, 8 ) ):
@@ -304,7 +307,7 @@ class DatabaseOperations ( BaseDatabaseOperations ):
         return query.query_class( DefaultQueryClass )
         
     # Function to quote the name of schema, table and column.
-    def quote_name( self, name ):
+    def quote_name( self, name = None):
         name = name.upper()
         if( name.startswith( "\"" ) & name.endswith( "\"" ) ):
             return name
