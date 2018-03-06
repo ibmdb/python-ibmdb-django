@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2017.                                      |
+# | (C) Copyright IBM Corporation 2009-2018.                                      |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -115,11 +115,18 @@ class DatabaseOperations ( BaseDatabaseOperations ):
         elif operator == '^':
             return 'POWER(%s, %s)' % ( sub_expressions[0], sub_expressions[1] )
         elif operator == '-':
-            if( djangoVersion[0:2] >= ( 1, 8 ) ):
-                str= sub_expressions[1]
-                sub_expressions[1]=str.replace('+', '-')
+            if( djangoVersion[0:2] >= ( 2 , 0) ):
+                strr= str(sub_expressions[1])
+                sub_expressions[1] = strr.replace('+', '-')
+            else:
+                sub_expressions[1] = str.replace('+', '-')
             return super( DatabaseOperations, self ).combine_expression( operator, sub_expressions )
         else:
+            if( djangoVersion[0:2] >= (2 , 0)):
+                strr= str(sub_expressions[1])
+                sub_expressions[1]=strr.replace('+', '-')
+            else:
+                sub_expressions[1] = str.replace('+', '-')
             return super( DatabaseOperations, self ).combine_expression( operator, sub_expressions )
     
     if( djangoVersion[0:2] >= ( 1, 8 ) ):
@@ -304,7 +311,7 @@ class DatabaseOperations ( BaseDatabaseOperations ):
         return query.query_class( DefaultQueryClass )
         
     # Function to quote the name of schema, table and column.
-    def quote_name( self, name ):
+    def quote_name( self, name = None):
         name = name.upper()
         if( name.startswith( "\"" ) & name.endswith( "\"" ) ):
             return name

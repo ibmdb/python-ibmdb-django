@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2016.                                      |
+# | (C) Copyright IBM Corporation 2009-2018.                                      |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -83,11 +83,13 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
         }
      
     def get_field_type(self, data_type, description):
-        if not _IS_JYTHON:
-            if data_type == Database.NUMBER:
-                if description.precision == 5:
-                    return 'SmallIntegerField'
-        return super(DatabaseIntrospection, self).get_field_type(data_type, description)
+        if (djangoVersion[0:2] < ( 2, 0) ): 
+            if not _IS_JYTHON:
+                if data_type == Database.NUMBER:
+                    if description.precision == 5:
+                        return 'SmallIntegerField'
+        else:
+            return super(DatabaseIntrospection, self).get_field_type(data_type, description)
     
     # Converting table name to lower case.
     def table_name_converter ( self, name ):        
@@ -236,8 +238,11 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
         if not _IS_JYTHON:
             dbms_name='dbms_name'
             schema = cursor.connection.get_current_schema()
-            if getattr(cursor.connection, dbms_name) != 'DB2':
-                sql = "SELECT TYPE FROM SYSCAT.TABLES WHERE TABSCHEMA='%(schema)s' AND TABNAME='%(table)s'" % {'schema': schema.upper(), 'table': table_name.upper()}
+
+            if (getattr(cursor.connection, dbms_name) == 'AS'):
+                 sql = "SELECT TYPE FROM QSYS2.SYSTABLES WHERE TABLE_SCHEMA='%(schema)s' AND TABLE_NAME='%(table)s'" % {'schema': schema.upper(), 'table': table_name.upper()}
+            elif ( getattr(cursor.connection, dbms_name) != 'DB2'):
+                 sql = "SELECT TYPE FROM SYSCAT.TABLES WHERE TABSCHEMA='%(schema)s' AND TABNAME='%(table)s'" % {'schema': schema.upper(), 'table': table_name.upper()}
             else:
                 sql = "SELECT TYPE FROM SYSIBM.SYSTABLES WHERE CREATOR='%(schema)s' AND NAME='%(table)s'" % {'schema': schema.upper(), 'table': table_name.upper()}
             cursor.execute(sql)
@@ -245,13 +250,8 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
 
         if table_type != 'X':
             cursor.execute( "SELECT * FROM %s FETCH FIRST 1 ROWS ONLY" % qn( table_name ) )
-            if djangoVersion < (1, 6):
-                for desc in cursor.description:
-                    description.append( [ desc[0].lower(), ] + desc[1:] )
-            else:
-                for desc in cursor.description:
-                    description.append(FieldInfo(*[desc[0].lower(), ] + desc[1:]))
-        
+            for desc in cursor.description:
+                description.append( [ desc[0].lower(), ] + desc[1:] )
         return description
 
     def get_constraints(self, cursor, table_name):
@@ -259,7 +259,10 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
         if not _IS_JYTHON:
             schema = cursor.connection.get_current_schema()
             dbms_name='dbms_name'
-            if getattr(cursor.connection, dbms_name) != 'DB2':
+
+            if (getattr(cursor.connection, dbms_name) == 'AS'):
+                sql = "SELECT CONSTRAINT_NAME, COLUMN_NAME FROM QSYS2.SYSCSTCOL WHERE TABLE_SCHEMA='%(schema)s' AND TABLE_NAME='%(table)s'" % {'schema': schema.upper(), 'table': table_name.upper()}
+            elif ( getattr(cursor.connection, dbms_name) != 'DB2'):
                 sql = "SELECT CONSTNAME, COLNAME FROM SYSCAT.COLCHECKS WHERE TABSCHEMA='%(schema)s' AND TABNAME='%(table)s'" % {'schema': schema.upper(), 'table': table_name.upper()}
             else:
                 sql = "SELECT CHECKNAME, COLNAME FROM SYSIBM.SYSCHECKDEP WHERE TBOWNER='%(schema)s' AND TBNAME='%(table)s'" % {'schema': schema.upper(), 'table': table_name.upper()}
@@ -276,8 +279,10 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                     }
                 constraints[constname]['columns'].append(colname.lower())
                 
-            if getattr(cursor.connection, dbms_name) != 'DB2':
-                sql = "SELECT KEYCOL.CONSTNAME, KEYCOL.COLNAME FROM SYSCAT.KEYCOLUSE KEYCOL INNER JOIN SYSCAT.TABCONST TABCONST ON KEYCOL.CONSTNAME=TABCONST.CONSTNAME WHERE TABCONST.TABSCHEMA='%(schema)s' and TABCONST.TABNAME='%(table)s' and TABCONST.TYPE='U'" % {'schema': schema.upper(), 'table': table_name.upper()}
+            if getattr(cursor.connection, dbms_name) == 'AS':
+                sql = "SELECT KEYCOL.CONSTRAINT_NAME, KEYCOL.COLUMN_NAME FROM QSYS2.SYSKEYCST KEYCOL INNER JOIN QSYS2.SYSCST TABCONST ON KEYCOL.CONSTRAINT_NAME=TABCONST.CONSTRAINT_NAME WHERE TABCONST.TABLE_SCHEMA='%(schema)s' and TABCONST.TABLE_NAME='%(table)s' and TABCONST.TYPE='U'" % {'schema': schema.upper(), 'table': table_name.upper()}
+            elif ( getattr(cursor.connection, dbms_name) != 'DB2'):
+               sql = "SELECT KEYCOL.CONSTNAME, KEYCOL.COLNAME FROM SYSCAT.KEYCOLUSE KEYCOL INNER JOIN SYSCAT.TABCONST TABCONST ON KEYCOL.CONSTNAME=TABCONST.CONSTNAME WHERE TABCONST.TABSCHEMA='%(schema)s' and TABCONST.TABNAME='%(table)s' and TABCONST.TYPE='U'" % {'schema': schema.upper(), 'table': table_name.upper()}
             else:
                 sql = "SELECT KEYCOL.CONSTNAME, KEYCOL.COLNAME FROM SYSIBM.SYSKEYCOLUSE KEYCOL INNER JOIN SYSIBM.SYSTABCONST TABCONST ON KEYCOL.CONSTNAME=TABCONST.CONSTNAME WHERE TABCONST.TBCREATOR='%(schema)s' AND TABCONST.TBNAME='%(table)s' AND TABCONST.TYPE='U'" % {'schema': schema.upper(), 'table': table_name.upper()}
             cursor.execute(sql)
@@ -337,3 +342,14 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                     continue
                 constraints[index['INDEX_NAME']]['columns'].append(index['COLUMN_NAME'].lower())
             return constraints
+
+    def get_sequences(self,cursor, table_name,table_fields=()):
+        from django.apps import apps
+        from django.db import models
+
+        seq_list=[]
+        for f in table_fields:
+            if(isinstance(f,models.AutoField)):
+               seq_list.append({'table':table_name, 'column': f.column})
+               break
+        return seq_list
