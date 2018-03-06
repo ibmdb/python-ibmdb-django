@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2017.                                      |
+# | (C) Copyright IBM Corporation 2009-2018.                                      |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -94,7 +94,7 @@ class DatabaseWrapper( object ):
         
         return connection
     
-    def is_active( self, connection ):
+    def is_active( self, connection = None ):
         return Database.ibm_db.active(connection.conn_handler)
         
     # Over-riding _cursor method to return DB2 cursor.
@@ -152,7 +152,8 @@ class DB2CursorWrapper( Database.Cursor ):
                 
     # Over-riding this method to modify SQLs which contains format parameter to qmark. 
     def execute( self, operation, parameters = () ):
-        operation = str(operation)
+        if( djangoVersion[0:2] >= (2 , 0)):
+            operation = str(operation)
         try:
             if operation.find('ALTER TABLE') == 0 and getattr(self.connection, dbms_name) != 'DB2':
                 doReorg = 1
