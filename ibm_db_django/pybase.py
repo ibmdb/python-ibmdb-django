@@ -68,7 +68,31 @@ class DatabaseWrapper( object ):
             )
         else:
             kwargs['dsn'] = kwargs.get( 'database' )
-        
+
+        if ( kwargsKeys.__contains__( 'currentschema' )):
+            kwargs['dsn'] += "CurrentSchema=%s;" % (  kwargs.get( 'currentschema' ))
+            del kwargs['currentschema']
+
+        if ( kwargsKeys.__contains__( 'security' )):
+            kwargs['dsn'] += "security=%s;" % (  kwargs.get( 'security' ))
+            del kwargs['security']
+
+        if ( kwargsKeys.__contains__( 'sslclientkeystoredb' )):
+            kwargs['dsn'] += "SSLCLIENTKEYSTOREDB=%s;" % (  kwargs.get( 'sslclientkeystoredb' ))
+            del kwargs['sslclientkeystoredb']
+
+        if ( kwargsKeys.__contains__( 'sslclientkeystoredbpassword' )):
+            kwargs['dsn'] += "SSLCLIENTKEYSTOREDBPASSWORD=%s;" % (  kwargs.get( 'sslclientkeystoredbpassword' ))
+            del kwargs['sslclientkeystoredbpassword']
+
+        if ( kwargsKeys.__contains__( 'sslclientkeystash' )):
+            kwargs['dsn'] += "SSLCLIENTKEYSTASH=%s;" % (  kwargs.get( 'sslclientkeystash' ))
+            del kwargs['sslclientkeystash']
+
+        if ( kwargsKeys.__contains__( 'sslservercertificate' )):
+            kwargs['dsn'] += "SSLSERVERCERTIFICATE=%s;" % (  kwargs.get( 'sslservercertificate' ))
+            del kwargs['sslservercertificate']
+
         # Before Django 1.6, autocommit was turned OFF
         if ( djangoVersion[0:2] >= ( 1, 6 )):
             conn_options = {Database.SQL_ATTR_AUTOCOMMIT : Database.SQL_AUTOCOMMIT_ON}

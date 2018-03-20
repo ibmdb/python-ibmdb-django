@@ -247,6 +247,37 @@ class DatabaseWrapper( BaseDatabaseWrapper ):
         else:
             if ( settings_dict.keys() ).__contains__( 'PCONNECT' ):
                 kwargs['PCONNECT'] = settings_dict['PCONNECT']
+
+        if('CURRENTSCHEMA' in settings_dict):
+            database_schema = settings_dict['CURRENTSCHEMA']
+            if isinstance( database_schema, str ):
+                kwargs['currentschema'] = database_schema
+
+        if('SECURITY'  in settings_dict):
+            database_security = settings_dict['SECURITY']
+            if isinstance( database_security, str ):
+                kwargs['security'] = database_security
+
+        if('SSLCLIENTKEYDB'  in settings_dict):
+            database_sslclientkeydb = settings_dict['SSLCLIENTKEYDB']
+            if isinstance( database_sslclientkeydb, str ):
+                kwargs['sslclientkeydb'] = database_sslclientkeydb
+
+        if('SSLCLIENTKEYSTOREDBPASSWORD'  in settings_dict):
+            database_sslclientkeystoredbpassword = settings_dict['SSLCLIENTKEYSTOREDBPASSWORD']
+            if isinstance( database_sslclientkeystoredbpassword, str ):
+                kwargs['sslclientkeystoredbpassword'] = database_sslclientkeystoredbpassword
+
+        if('SSLCLIENTKEYSTASH'  in settings_dict):
+            database_sslclientkeystash =settings_dict['SSLCLIENTKEYSTASH']
+            if isinstance( database_sslclientkeystash, str ):
+                kwargs['sslclientkeystash'] = database_sslclientkeystash
+
+        if('SSLSERVERCERTIFICATE'  in settings_dict):
+            database_sslservercertificate =settings_dict['SSLSERVERCERTIFICATE']
+            if isinstance( database_sslservercertificate, str ):
+                kwargs['sslservercertificate'] = database_sslservercertificate
+
         return kwargs
     
     # To get new connection from Database
