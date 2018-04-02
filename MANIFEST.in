@@ -1,0 +1,3 @@
+include CHANGES LICENSE README.md
+recursive-include ibm_db_django *.py 
+include MANIFEST.in
