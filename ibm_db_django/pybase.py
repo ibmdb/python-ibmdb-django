@@ -58,6 +58,7 @@ if ( djangoVersion[0:2] >= ( 1, 6 )):
 class DatabaseWrapper( object ):
     # Get new database connection for non persistance connection 
     def get_new_connection(self, kwargs):
+        SchemaFlag= False
         kwargsKeys = kwargs.keys()
         if ( kwargsKeys.__contains__( 'port' ) and 
             kwargsKeys.__contains__( 'host' ) ):
@@ -71,6 +72,8 @@ class DatabaseWrapper( object ):
 
         if ( kwargsKeys.__contains__( 'currentschema' )):
             kwargs['dsn'] += "CurrentSchema=%s;" % (  kwargs.get( 'currentschema' ))
+            currentschema= kwargs.get( 'currentschema' )
+            SchemaFlag = True
             del kwargs['currentschema']
 
         if ( kwargsKeys.__contains__( 'security' )):
@@ -115,6 +118,9 @@ class DatabaseWrapper( object ):
         else:
             connection = Database.connect( **kwargs )
         connection.autocommit = connection.set_autocommit
+
+        if SchemaFlag:
+            schema = connection.set_current_schema(currentschema)
         
         return connection
     
