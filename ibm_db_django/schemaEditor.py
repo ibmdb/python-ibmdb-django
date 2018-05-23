@@ -157,7 +157,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
             new_db_field = new_field.db_parameters(connection=self.connection)
             old_db_field_type = old_db_field['type']
             new_db_field_type = new_db_field['type'] 
-            
+
         if old_db_field_type != new_db_field_type:
             alter_field_data_type = True
                 
@@ -432,7 +432,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
             self.execute(
                 self.sql_create_unique % {
                     'table': self.quote_name(model._meta.db_table),
-                    'name': self._create_index_name(model._meta.db_table, [new_field.column], suffix="_uniq"),
+                    'name': self._create_index_name(model, [new_field.column], suffix="_uniq"),
                     'columns': self.quote_name(new_field.column),
                 }
             )    
