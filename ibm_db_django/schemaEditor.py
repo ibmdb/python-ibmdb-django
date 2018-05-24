@@ -102,7 +102,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         else:
             value = str(value)
         return value
-    
+
     def alter_field(self, model, old_field, new_field, strict=False):
         alter_field_data_type = False
         alter_field_nullable = False
@@ -115,29 +115,42 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         rebuild_incomming_fk = False
         alter_incomming_fk_data_type = False
         deferred_constraints = {
-                          'pk': {},
-                          'unique': {},
-                          'index': {},
-                          'check': {}}
-        
+            'pk': {},
+            'unique': {},
+            'index': {},
+            'check': {}}
+
         old_db_field = old_field.db_parameters(connection=self.connection)
         new_db_field = new_field.db_parameters(connection=self.connection)
         old_db_field_type = old_db_field['type']
         new_db_field_type = new_db_field['type']
 
         if( djangoVersion[0:2] < ( 1, 9 ) ):
-            if old_field.rel is not None and hasattr(old_field.rel,'through'):
+            if old_field.rel is not None and hasattr(old_field.rel, 'through'):
                 rel_condition = (old_field.rel.through and new_field.rel.through and old_field.rel.through._meta.auto_created and new_field.rel.through._meta.auto_created)
+                rel_condition_noop = old_field.rel.through and new_field.rel.through and (not old_field.rel.through._meta.auto_created and not new_field.rel.through._meta.auto_created)
             else:
                 rel_condition = False
+                rel_condition_noop = False
         else:
-            if old_field.remote_field is not None and hasattr(old_field.remote_field,'through'):
+            if old_field.remote_field is not None and hasattr(old_field.remote_field, 'through'):
                 rel_condition = (old_field.remote_field.through and new_field.remote_field.through and old_field.remote_field.through._meta.auto_created and new_field.remote_field.through._meta.auto_created)
+                rel_condition_noop = old_field.remote_field.through and new_field.remote_field.through and (not old_field.remote_field.through._meta.auto_created and not new_field.remote_field.through._meta.auto_created)
             else:
                 rel_condition = False
-            
+                rel_condition_noop = False
+
         if ((old_db_field_type, new_db_field_type) == (None, None)) and rel_condition:
-                return self._alter_many_to_many(model, old_field, new_field, strict)
+            return self._alter_many_to_many(model, old_field, new_field, strict)
+        elif old_db_field_type is None and new_db_field_type is None:
+            if rel_condition_noop:
+                return
+            else:
+                raise ValueError(
+                    "Cannot alter field %s into %s - they are not compatible types "
+                    "(you cannot alter to or from M2M fields, or add or remove "
+                    "through= on M2M fields)" % (old_field, new_field)
+                )
         elif old_db_field_type is None or new_db_field_type is None:
                 raise ValueError("Cannot alter field %s into %s" % (
                     old_db_field,
