@@ -84,6 +84,8 @@ class DatabaseOperations ( BaseDatabaseOperations ):
         field_type = expression.output_field.get_internal_type()
         if field_type in ( 'BinaryField',  ):
             converters.append(self.convert_binaryfield_value)   
+        elif field_type in ( 'BooleanField', 'NullBooleanField' ):
+            converters.append(self.convert_booleanfield_value)
         #  else:
         #   converters.append(self.convert_empty_values)
         """Get a list of functions needed to convert field data.
@@ -132,6 +134,12 @@ class DatabaseOperations ( BaseDatabaseOperations ):
     if( djangoVersion[0:2] >= ( 1, 8 ) ):
         def convert_binaryfield_value( self,value, expression,connections, context ):
             return value    
+
+        def convert_booleanfield_value(self, value, expression, connections, context):
+            if value in (0, 1):
+                return bool(value)
+            return value
+
     else:
         def convert_binaryfield_value( self,value, expression, context ):
         # field_type = field.get_internal_type()
@@ -139,6 +147,11 @@ class DatabaseOperations ( BaseDatabaseOperations ):
         #    if value in ( 0, 1 ):
         #       return bool( value )
         #else:
+            return value
+
+        def convert_booleanfield_value(self, value, expression, context):
+            if value in (0, 1):
+                return bool(value)
             return value
  
     if( djangoVersion[0:2] >= ( 1, 8 ) ):
