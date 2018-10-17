@@ -25,93 +25,10 @@ if sys.version_info >= (3, ):
         from itertools import izip_longest as zip_longest
 # For checking django's version
 from django import VERSION as djangoVersion
-        
+
+
 class SQLCompiler( compiler.SQLCompiler ):
-    __rownum = 'Z.__ROWNUM'
 
-    # To get ride of LIMIT/OFFSET problem in DB2, this method has been implemented.
-    def as_sql( self, with_limits=True, with_col_aliases=False, subquery=False ):
-        self.subquery = subquery
-        self.__do_filter( self.query.where.children )
-        self.pre_sql_setup()
-        if self.query.distinct:
-            if ((self.connection.settings_dict.keys()).__contains__('FETCH_DISTINCT_ON_TEXT')) and not self.connection.settings_dict['FETCH_DISTINCT_ON_TEXT']:
-                out_cols = self.get_columns(False)
-                for col in out_cols:
-                    col = col.split(".")[1].replace('"', '').lower()
-                    field = self.query.model._meta.get_field_by_name(col)[0]
-                    fieldType = field.get_internal_type()
-                    if fieldType == 'TextField':
-                        self.query.distinct = False
-                        break
-        if not ( with_limits and ( self.query.high_mark is not None or self.query.low_mark ) ):
-            return super( SQLCompiler, self ).as_sql( False, with_col_aliases )
-        else:
-            if self.query.high_mark == self.query.low_mark:
-                return '', ()
-            
-            sql_ori, params = super( SQLCompiler, self ).as_sql( False, with_col_aliases )
-            if self.query.low_mark is 0:
-                return sql_ori + " FETCH FIRST %s ROWS ONLY" % ( self.query.high_mark ), params
-            sql_split = sql_ori.split( " FROM " )
-            
-            sql_sec = ""
-            if len( sql_split ) > 2:
-                for i in range( 1, len( sql_split ) ):
-                    sql_sec = " %s FROM %s " % ( sql_sec, sql_split[i] )
-            else:
-                sql_sec = " FROM %s " % ( sql_split[1] )
-            
-            dummyVal = "Z.__db2_"
-            sql_pri = ""
-            
-            sql_sel = "SELECT"
-            if self.query.distinct:
-                sql_sel = "SELECT DISTINCT"
-
-            sql_select_token = sql_split[0].split( "," )
-            i = 0
-            while ( i < len( sql_select_token ) ):
-                if sql_select_token[i].count( "TIMESTAMP(DATE(SUBSTR(CHAR(" ) == 1:
-                    sql_sel = "%s \"%s%d\"," % ( sql_sel, dummyVal, i + 1 )
-                    sql_pri = '%s %s,%s,%s,%s AS "%s%d",' % ( 
-                                    sql_pri,
-                                    sql_select_token[i],
-                                    sql_select_token[i + 1],
-                                    sql_select_token[i + 2],
-                                    sql_select_token[i + 3],
-                                    dummyVal, i + 1 )
-                    i = i + 4
-                    continue
-                
-                if sql_select_token[i].count( " AS " ) == 1:
-                    temp_col_alias = sql_select_token[i].split( " AS " )
-                    sql_pri = '%s %s,' % ( sql_pri, sql_select_token[i] )
-                    sql_sel = "%s %s," % ( sql_sel, temp_col_alias[1] )
-                    i = i + 1
-                    continue
-            
-                sql_pri = '%s %s AS "%s%d",' % ( sql_pri, sql_select_token[i], dummyVal, i + 1 )
-                sql_sel = "%s \"%s%d\"," % ( sql_sel, dummyVal, i + 1 )
-                i = i + 1
-
-            sql_pri = sql_pri[:len( sql_pri ) - 1]
-            sql_pri = "%s%s" % ( sql_pri, sql_sec )
-            sql_sel = sql_sel[:len( sql_sel ) - 1]
-            sql = '%s, ( ROW_NUMBER() OVER() ) AS "%s" FROM ( %s ) AS M' % ( sql_sel, self.__rownum, sql_pri )
-            sql = '%s FROM ( %s ) Z WHERE' % ( sql_sel, sql )
-            
-            if self.query.low_mark is not 0:
-                sql = '%s "%s" > %d' % ( sql, self.__rownum, self.query.low_mark )
-                
-            if self.query.low_mark is not 0 and self.query.high_mark is not None:
-                sql = '%s AND ' % ( sql )
-
-            if self.query.high_mark is not None:
-                sql = '%s "%s" <= %d' % ( sql, self.__rownum, self.query.high_mark )
-
-        return sql, params
-    
     def __map23(self, value, field):
         if sys.version_info >= (3, ):
             return zip_longest(value, field)
