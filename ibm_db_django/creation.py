@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2018.                                      |
+# | (C) Copyright IBM Corporation 2009-2018.                                 |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -72,28 +72,13 @@ class DatabaseCreation ( BaseDatabaseCreation ):
         'URLField':                     'VARCHAR2(%(max_length)s)',
         'XMLField':                     'XML',
         'BinaryField':                  'BLOB',
-        
+        'UUIDField':                    'VARCHAR(255)',
+        "DurationField":                'DOUBLE',
+        'BooleanField':                 'SMALLINT',
+        'NullBooleanField':             'SMALLINT',
+        'PositiveIntegerField':         'INTEGER',
+        'PositiveSmallIntegerField':    'SMALLINT',
     }
-    
-    if( djangoVersion[0:2] >= ( 1, 8 ) ):
-        data_types.update({
-            'UUIDField':                 'VARCHAR(255)',
-            "DurationField":                'DOUBLE',
-        })
-    if( djangoVersion[0:2] <= ( 1, 6 ) ):
-        data_types.update({
-            'BooleanField':                 'SMALLINT CHECK (%(attname)s IN (0,1))',
-            'NullBooleanField':             'SMALLINT CHECK (%(attname)s IN (0,1) OR (%(attname)s IS NULL))',
-            'PositiveIntegerField':         'INTEGER CHECK (%(attname)s >= 0)',
-            'PositiveSmallIntegerField':    'SMALLINT CHECK (%(attname)s >= 0)',
-        })
-    else:
-        data_types.update({
-            'BooleanField':                 'SMALLINT',
-            'NullBooleanField':             'SMALLINT',
-            'PositiveIntegerField':         'INTEGER',
-            'PositiveSmallIntegerField':    'SMALLINT',
-        })
     
     data_type_check_constraints = {
         'BooleanField': '%(attname)s IN (0,1)',
@@ -110,7 +95,7 @@ class DatabaseCreation ( BaseDatabaseCreation ):
         # ignore tablespace information
         tablespace_sql = ''
         i = 0
-        if( djangoVersion[0:2] >= ( 1, 8 ) and  'DB2' not in getattr(self.connection.connection, dbms_name)) or getattr(self.connection.connection, dbms_name) != 'DB2':
+        if( 'DB2' not in getattr(self.connection.connection, dbms_name)) or getattr(self.connection.connection, dbms_name) != 'DB2':
             if len( model._meta.unique_together_index ) != 0:
                 for unique_together_index in model._meta.unique_together_index:
                     i = i + 1
@@ -237,26 +222,16 @@ class DatabaseCreation ( BaseDatabaseCreation ):
         test_database = kwargs.get( 'database' )
         if verbosity > 1:
             print ("Preparing Database..." )
-            
-        if( djangoVersion[0:2] <= ( 1, 1 ) ):
-            settings.DATABASE_NAME = test_database
-            settings.__setattr__( 'PCONNECT', False )
-            call_command( 'syncdb', verbosity = verbosity, interactive = False )
+
+        self.connection.settings_dict['NAME'] = test_database
+        self.connection.settings_dict['PCONNECT'] = False
+        # Confirm the feature set of the test database
+        if(djangoVersion[0:2] >= (2 , 0)):
+            call_command( 'migrate', database = self.connection.alias, verbosity = verbosity, interactive = False)
         else:
-            self.connection.settings_dict['NAME'] = test_database
-            self.connection.settings_dict['PCONNECT'] = False     
-            # Confirm the feature set of the test database
-            if( ( 1, 2 ) < djangoVersion[0:2] < (1,5) ):
-                self.connection.features.confirm()
-            if (djangoVersion[0:2] < (1, 7)):
-                call_command( 'syncdb', database = self.connection.alias, verbosity = verbosity, interactive = False, load_initial_data = False )
-            else:
-                if(djangoVersion[0:2] >= (2 , 0)):
-                    call_command( 'migrate', database = self.connection.alias, verbosity = verbosity, interactive = False)
-                else:
-                    call_command( 'migrate', database = self.connection.alias, verbosity = verbosity, interactive = False ,load_initial_data = False )
-            # We need to then do a flush to ensure that any data installed by custom SQL has been removed.
-            call_command('flush', database=self.connection.alias, verbosity = verbosity, interactive=False)
+            call_command( 'migrate', database = self.connection.alias, verbosity = verbosity, interactive = False ,load_initial_data = False )
+        # We need to then do a flush to ensure that any data installed by custom SQL has been removed.
+        call_command('flush', database=self.connection.alias, verbosity = verbosity, interactive=False)
         return test_database
     
     # Method to destroy database. For Jython nothing is getting done over here.
@@ -280,13 +255,9 @@ class DatabaseCreation ( BaseDatabaseCreation ):
                 if verbosity > 1:
                     print ("Droping Test Database %s" % ( kwargs.get( 'database' ) ))
                 Database.dropdb( **kwargs )
-                
-            if( djangoVersion[0:2] <= ( 1, 1 ) ):
-                settings.DATABASE_NAME = old_database_name
-                settings.PCONNECT = True
-            else:
-                self.connection.settings_dict['NAME'] = old_database_name
-                self.connection.settings_dict['PCONNECT'] = True
+
+            self.connection.settings_dict['NAME'] = old_database_name
+            self.connection.settings_dict['PCONNECT'] = True
         return old_database_name
     
     # As DB2 does not allow to insert NULL value in UNIQUE col, hence modifing model.
@@ -351,29 +322,17 @@ class DatabaseCreation ( BaseDatabaseCreation ):
             strvar = str
         else:
             strvar = basestring
-        if( djangoVersion[0:2] <= ( 1, 1 ) ):
-            if( isinstance( settings.TEST_DATABASE_NAME, strvar ) and 
-                ( settings.TEST_DATABASE_NAME != '' ) ):
-                database = settings.TEST_DATABASE_NAME
-            else:
-                database = settings.DATABASE_NAME
-            database_user = settings.DATABASE_USER
-            database_pass = settings.DATABASE_PASSWORD
-            database_host = settings.DATABASE_HOST
-            database_port = settings.DATABASE_PORT
-            settings.DATABASE_SUPPORTS_TRANSACTIONS = True
+        if( isinstance( self.connection.settings_dict['NAME'], strvar ) and
+            ( self.connection.settings_dict['NAME'] != '' ) ):
+            database = self.connection.settings_dict['NAME']
         else:
-            if( isinstance( self.connection.settings_dict['NAME'], strvar ) and 
-                ( self.connection.settings_dict['NAME'] != '' ) ):
-                database = self.connection.settings_dict['NAME']
-            else:
-                from django.core.exceptions import ImproperlyConfigured
-                raise ImproperlyConfigured( "the database Name doesn't exist" )
-            database_user = self.connection.settings_dict['USER']
-            database_pass = self.connection.settings_dict['PASSWORD']
-            database_host = self.connection.settings_dict['HOST']
-            database_port = self.connection.settings_dict['PORT']
-            self.connection.settings_dict['SUPPORTS_TRANSACTIONS'] = True
+            from django.core.exceptions import ImproperlyConfigured
+            raise ImproperlyConfigured( "the database Name doesn't exist" )
+        database_user = self.connection.settings_dict['USER']
+        database_pass = self.connection.settings_dict['PASSWORD']
+        database_host = self.connection.settings_dict['HOST']
+        database_port = self.connection.settings_dict['PORT']
+        self.connection.settings_dict['SUPPORTS_TRANSACTIONS'] = True
         
         kwargs = { }   
         kwargs['database'] = database

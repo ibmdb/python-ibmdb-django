@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2018.                                      |
+# | (C) Copyright IBM Corporation 2009-2018.                                 |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -25,7 +25,6 @@ try:
 except ImportError:
     from django.db.backends.base.client import BaseDatabaseClient
 
-from django import VERSION as djangoVersion
 import types
 
 import os
@@ -34,21 +33,10 @@ class DatabaseClient( BaseDatabaseClient ):
     
     #Over-riding base method to provide shell support for DB2 through Django.
     def runshell( self ):
-        if ( djangoVersion[0:2] <= ( 1, 0 ) ):
-            from django.conf import settings
-            database_name = settings.DATABASE_NAME
-            database_user = settings.DATABASE_USER
-            database_password = settings.DATABASE_PASSWORD
-        elif ( djangoVersion[0:2] <= ( 1, 1 ) ):
-            settings_dict = self.connection.settings_dict
-            database_name = settings_dict['DATABASE_NAME']
-            database_user = settings_dict['DATABASE_USER']
-            database_password = settings_dict['DATABASE_PASSWORD']
-        else:
-            settings_dict = self.connection.settings_dict
-            database_name = settings_dict['NAME']
-            database_user = settings_dict['USER']
-            database_password = settings_dict['PASSWORD']
+        settings_dict = self.connection.settings_dict
+        database_name = settings_dict['NAME']
+        database_user = settings_dict['USER']
+        database_password = settings_dict['PASSWORD']
             
         cmdArgs = ["db2"]
         

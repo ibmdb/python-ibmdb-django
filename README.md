@@ -9,9 +9,9 @@ The adapter has been developed and is supported by IBM
 
 # Prerequisites for Django on Python 
 
- * Python 2.5.
- * Django Framework 1.7.x or above.
- * IBM_DB driver and IBM_DB_DBI wrapper 1.0 or higher 
+ * Python 2.7 or Python 3
+ * Django 1.8 or above
+ * ibm_db 1.0 or above
  
 # Installation 
 

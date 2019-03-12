@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2018.                                      |
+# | (C) Copyright IBM Corporation 2009-2018.                                 |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -55,23 +55,18 @@ if not _IS_JYTHON:
 else:
     import ibm_db_django.jybase as Base
     from com.ziclix.python.sql import zxJDBC as Database
-    
-# For checking django's version
-from django import VERSION as djangoVersion
 
-if ( djangoVersion[0:2] >= ( 1, 7 )):
-    from ibm_db_django.schemaEditor import DB2SchemaEditor
+from ibm_db_django.schemaEditor import DB2SchemaEditor
 
 DatabaseError = Database.DatabaseError
 IntegrityError = Database.IntegrityError
-if ( djangoVersion[0:2] >= ( 1, 6 )):
-    Error = Database.Error
-    InterfaceError = Database.InterfaceError
-    DataError = Database.DataError
-    OperationalError = Database.OperationalError
-    InternalError = Database.InternalError
-    ProgrammingError = Database.ProgrammingError
-    NotSupportedError = Database.NotSupportedError
+Error = Database.Error
+InterfaceError = Database.InterfaceError
+DataError = Database.DataError
+OperationalError = Database.OperationalError
+InternalError = Database.InternalError
+ProgrammingError = Database.ProgrammingError
+NotSupportedError = Database.NotSupportedError
     
 
 if _IS_JYTHON:
@@ -147,8 +142,7 @@ class DatabaseWrapper( BaseDatabaseWrapper ):
         "istartswith":  "LIKE UPPER(%s) ESCAPE '\\'",
         "iendswith":    "LIKE UPPER(%s) ESCAPE '\\'",
     }
-    if( djangoVersion[0:2] >= ( 1, 6 ) ):
-        Database = Database
+    Database = Database
 
     client_class = DatabaseClient
     creation_class = DatabaseCreation
@@ -161,25 +155,13 @@ class DatabaseWrapper( BaseDatabaseWrapper ):
     def __init__( self, *args ):
         super( DatabaseWrapper, self ).__init__( *args )
         self.ops = DatabaseOperations( self )
-        if( djangoVersion[0:2] <= ( 1, 0 ) ):
-            self.client = DatabaseClient()
-        else:
-            self.client = DatabaseClient( self )
-        if( djangoVersion[0:2] <= ( 1, 2 ) ):
-            self.features = DatabaseFeatures()
-        else:
-            self.features = DatabaseFeatures( self )
+        self.client = DatabaseClient( self )
+        self.features = DatabaseFeatures( self )
         self.creation = DatabaseCreation( self )
-        
-        if( djangoVersion[0:2] >= ( 1, 8 ) ): 
-            self.data_types=self.creation.data_types
-            self.data_type_check_constraints=self.creation.data_type_check_constraints
-        
+        self.data_types=self.creation.data_types
+        self.data_type_check_constraints=self.creation.data_type_check_constraints
         self.introspection = DatabaseIntrospection( self )
-        if( djangoVersion[0:2] <= ( 1, 1 ) ):
-            self.validation = DatabaseValidation()
-        else:
-            self.validation = DatabaseValidation( self )
+        self.validation = DatabaseValidation( self )
         self.databaseWrapper = Base.DatabaseWrapper()
     
     # Method to check if connection is live or not.
@@ -193,29 +175,13 @@ class DatabaseWrapper( BaseDatabaseWrapper ):
         else:
             strvar = basestring
         kwargs = { }
-        if ( djangoVersion[0:2] <= ( 1, 0 ) ):
-            database_name = self.settings.DATABASE_NAME
-            database_user = self.settings.DATABASE_USER
-            database_pass = self.settings.DATABASE_PASSWORD
-            database_host = self.settings.DATABASE_HOST
-            database_port = self.settings.DATABASE_PORT
-            database_options = self.settings.DATABASE_OPTIONS
-        elif ( djangoVersion[0:2] <= ( 1, 1 ) ):
-            settings_dict = self.settings_dict
-            database_name = settings_dict['DATABASE_NAME']
-            database_user = settings_dict['DATABASE_USER']
-            database_pass = settings_dict['DATABASE_PASSWORD']
-            database_host = settings_dict['DATABASE_HOST']
-            database_port = settings_dict['DATABASE_PORT']
-            database_options = settings_dict['DATABASE_OPTIONS']
-        else:
-            settings_dict = self.settings_dict
-            database_name = settings_dict['NAME']
-            database_user = settings_dict['USER']
-            database_pass = settings_dict['PASSWORD']
-            database_host = settings_dict['HOST']
-            database_port = settings_dict['PORT']
-            database_options = settings_dict['OPTIONS']
+        settings_dict = self.settings_dict
+        database_name = settings_dict['NAME']
+        database_user = settings_dict['USER']
+        database_pass = settings_dict['PASSWORD']
+        database_host = settings_dict['HOST']
+        database_port = settings_dict['PORT']
+        database_options = settings_dict['OPTIONS']
  
         if database_name != '' and isinstance( database_name, strvar ):
             kwargs['database'] = database_name
@@ -239,13 +205,9 @@ class DatabaseWrapper( BaseDatabaseWrapper ):
         
         if isinstance( database_options, dict ):
             kwargs['options'] = database_options
-        
-        if ( djangoVersion[0:2] <= ( 1, 0 ) ):
-           if( hasattr( settings, 'PCONNECT' ) ):
-               kwargs['PCONNECT'] = settings.PCONNECT
-        else:
-            if ( settings_dict.keys() ).__contains__( 'PCONNECT' ):
-                kwargs['PCONNECT'] = settings_dict['PCONNECT']
+
+        if ( settings_dict.keys() ).__contains__( 'PCONNECT' ):
+            kwargs['PCONNECT'] = settings_dict['PCONNECT']
 
         if('CURRENTSCHEMA' in settings_dict):
             database_schema = settings_dict['CURRENTSCHEMA']
@@ -289,41 +251,23 @@ class DatabaseWrapper( BaseDatabaseWrapper ):
         return connection
         
     # Over-riding _cursor method to return DB2 cursor.
-    if ( djangoVersion[0:2] < ( 1, 6 )):
-        def _cursor( self, settings = None ):
-            if not self.__is_connection():
-                if ( djangoVersion[0:2] <= ( 1, 0 ) ):
-                    self.settings = settings
-                    
-                self.connection = self.get_new_connection(self.get_connection_params())
-                cursor = self.databaseWrapper._cursor(self.connection)
-                
-                if( djangoVersion[0:3] <= ( 1, 2, 2 ) ):
-                    connection_created.send( sender = self.__class__ )
-                else:
-                    connection_created.send( sender = self.__class__, connection = self )
-            else:
-                cursor = self.databaseWrapper._cursor( self.connection )  
-            return cursor
-    else:
-        def create_cursor( self , name = None):
-            return self.databaseWrapper._cursor( self.connection )
-            
-        def init_connection_state( self ):
-            pass
+    def create_cursor( self , name = None):
+        return self.databaseWrapper._cursor( self.connection )
         
-        def is_usable(self):
-            if self.databaseWrapper.is_active( self.connection ):
-                return True
-            else:
-                return False
+    def init_connection_state( self ):
+        pass
+
+    def is_usable(self):
+        if self.databaseWrapper.is_active( self.connection ):
+            return True
+        else:
+            return False
             
     def _set_autocommit(self, autocommit):
         self.connection.set_autocommit( autocommit )
      
     def close( self ):
-        if( djangoVersion[0:2] >= ( 1, 5 ) ):
-            self.validate_thread_sharing()
+        self.validate_thread_sharing()
         if self.connection is not None:
             self.databaseWrapper.close( self.connection )
             self.connection = None

@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2018.                                      |
+# | (C) Copyright IBM Corporation 2009-2018.                                 |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -24,19 +24,16 @@ try:
 except ImportError as e:
     from django.core.exceptions import ImproperlyConfigured
     raise ImproperlyConfigured( "Error loading zxJDBC module: %s" % e )
-# For checking django's version
-from django import VERSION as djangoVersion
 
 DatabaseError = zxJDBC.DatabaseError
 IntegrityError = zxJDBC.IntegrityError
-if ( djangoVersion[0:2] >= ( 1, 6 )):
-    Error = zxJDBC.Error
-    InterfaceError = zxJDBC.InterfaceError
-    DataError = zxJDBC.DataError
-    OperationalError = zxJDBC.OperationalError
-    InternalError = zxJDBC.InternalError
-    ProgrammingError = zxJDBC.ProgrammingError
-    NotSupportedError = zxJDBC.NotSupportedError
+Error = zxJDBC.Error
+InterfaceError = zxJDBC.InterfaceError
+DataError = zxJDBC.DataError
+OperationalError = zxJDBC.OperationalError
+InternalError = zxJDBC.InternalError
+ProgrammingError = zxJDBC.ProgrammingError
+NotSupportedError = zxJDBC.NotSupportedError
 
 class DatabaseWrapper( object ):
     # Get new database connection for non persistance connection 

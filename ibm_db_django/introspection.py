@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2018.                                      |
+# | (C) Copyright IBM Corporation 2009-2018.                                 |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -54,11 +54,8 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
             Database.TIME :             "TimeField",
             Database.DATETIME :         "DateTimeField",
         }    
-        if(djangoVersion[0:2] > (1, 1)):
-            data_types_reverse[Database.BINARY] = "BinaryField"
-            data_types_reverse[Database.BIGINT] = "BigIntegerField"
-        else:
-            data_types_reverse[Database.BIGINT] = "IntegerField"
+        data_types_reverse[Database.BINARY] = "BinaryField"
+        data_types_reverse[Database.BIGINT] = "BigIntegerField"
     else:
         data_types_reverse = {
             zxJDBC.CHAR:                "CharField",
@@ -83,7 +80,7 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
         }
      
     def get_field_type(self, data_type, description):
-        if (djangoVersion[0:2] < ( 2, 0) ): 
+        if (djangoVersion[0:2] < ( 2, 0) ):
             if not _IS_JYTHON:
                 if data_type == Database.NUMBER:
                     if description.precision == 5:
@@ -101,10 +98,7 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
         table_list = []
         if not _IS_JYTHON:
             for table in cursor.connection.tables( cursor.connection.get_current_schema() ):
-                if( djangoVersion[0:2] < ( 1, 8 ) ):
-                    table_list.append( table['TABLE_NAME'].lower() )
-                else:
-                    table_list.append(TableInfo( table['TABLE_NAME'].lower(),'t'))
+                table_list.append(TableInfo( table['TABLE_NAME'].lower(),'t'))
         else:
             cursor.execute( "select current_schema from sysibm.sysdummy1" )
             schema = cursor.fetchone()[0]
@@ -112,8 +106,7 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
             cursor.tables( None, schema, None, ( "TABLE", ) )
             for table in cursor.fetchall():
                 # table[2] is table name
-                if( djangoVersion[0:2] < ( 1, 8 ) ):
-                    table_list.append( table[2].lower() )
+                table_list.append( table[2].lower() )
             table_list.append(TableInfo(table[2].lower(),"t"))
                 
         return table_list

@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2018.                                      |
+# | (C) Copyright IBM Corporation 2009-2018.                                 |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -156,11 +156,3 @@ class SQLUpdateCompiler( compiler.SQLUpdateCompiler, SQLCompiler ):
 
 class SQLAggregateCompiler( compiler.SQLAggregateCompiler, SQLCompiler ):
     pass
-
-if djangoVersion[0:2] < ( 1, 8 ):
-    class SQLDateCompiler(compiler.SQLDateCompiler, SQLCompiler):
-        pass
-
-if djangoVersion[0:2] >= ( 1, 6 ) and djangoVersion[0:2] < ( 1, 8 ):
-    class SQLDateTimeCompiler(compiler.SQLDateTimeCompiler, SQLCompiler):
-        pass
