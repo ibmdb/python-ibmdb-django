@@ -187,6 +187,8 @@ class DB2CursorWrapper( Database.Cursor ):
         try:
             if operation.find('ALTER TABLE') == 0 and getattr(self.connection, dbms_name) != 'DB2':
                 doReorg = 1
+                sName = self.connection.get_current_schema().upper()
+                tName = operation.split('"')[1]
             else:
                 doReorg = 0
             if operation.count("db2regexExtraField(%s)") > 0:
@@ -201,14 +203,14 @@ class DB2CursorWrapper( Database.Cursor ):
             if ( djangoVersion[0:2] <= ( 1, 1 ) ):
                 if ( doReorg == 1 ):
                     super( DB2CursorWrapper, self ).execute( operation, parameters )
-                    return self._reorg_tables()
+                    return self._reorg_table(sName, tName)
                 else:    
                     return super( DB2CursorWrapper, self ).execute( operation, parameters )
             else:
                 try:
                     if ( doReorg == 1 ):
                         super( DB2CursorWrapper, self ).execute( operation, parameters )
-                        return self._reorg_tables()
+                        return self._reorg_table(sName, tName)
                     else:    
                         return super( DB2CursorWrapper, self ).execute( operation, parameters )
                 except IntegrityError as e:
@@ -277,6 +279,11 @@ class DB2CursorWrapper( Database.Cursor ):
                 reorgSQLs.append(reorgSQL)
             for sql in reorgSQLs:
                 super( DB2CursorWrapper, self ).execute(sql)
+
+    # table reorganization method
+    def _reorg_table( self, sName, tName ):
+        reorgSQL = '''CALL SYSPROC.ADMIN_CMD('REORG TABLE "%(sName)s"."%(tName)s"')''' % {'sName': sName, 'tName': tName}
+        super( DB2CursorWrapper, self ).execute(reorgSQL)
     
     # Over-riding this method to modify result set containing datetime and time zone support is active
     def fetchone( self ):
