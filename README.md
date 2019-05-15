@@ -39,7 +39,6 @@ $ pip install ibm_db_django
 # Supported Databases 
 
  * IBM DB2 Database for Linux, Unix and Windows, version 8.2 or higher.
- * Remote connections to z/OS (DB2 UDB for zOS)
 
 # Future Supported Databases 
 
@@ -49,7 +48,7 @@ $ pip install ibm_db_django
  * Remote connections to i5/OS (iSeries)
 
 # Testing 
-
+```
  * Create a new Django project by executing "django-admin.py startproject myproj".
  * Now go to this newly create directory, and edit settings.py file to access DB2.
  * In case of nix the steps will be like:
@@ -72,7 +71,11 @@ $ pip install ibm_db_django
       }
    }
    }}}
- * To enable DB2 support you need to set value of DATABASE_ENGINE to 'ibm_db_django' in settings.py.
+   
+ * Change USE_TZ to False
+ 
+ * RUN python manage.py migrate
+ 
  * In the tuple INSTALLED_APPS in settings.py add the following lines:
    {{{
    'django.contrib.flatpages',
@@ -86,7 +89,7 @@ $ pip install ibm_db_django
    $ Python manage.py test django.contrib.auth #For Django-1.6.x onwards, since test discovery behavior have changed
    }}} 
  * For Windows, steps are same as above. In case of editing settings.py file, use notepad (or any other) editor.
-
+```
 # Database Transactions 
 
  *  Django by default executes without transactions i.e. in auto-commit mode. This default is generally not what you want in web-applications. [http://docs.djangoproject.com/en/dev/topics/db/transactions/ Remember to turn on transaction support in Django]
@@ -102,7 +105,6 @@ $ pip install ibm_db_django
 
   Your feedback is very much appreciated and expected through project ibm-db:
 
- * ibm-db_django discuss : http://groups.google.com/group/ibm_db
  * ibm-db issues reports: https://github.com/ibmdb/python-ibmdb/issues
 
 # Contributing to the ibm_db-django python project
