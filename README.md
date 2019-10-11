@@ -9,9 +9,16 @@ The adapter has been developed and is supported by IBM
 
 # Prerequisites for Django on Python 
 
- * Python 2.5.
- * Django Framework 1.7.x or above.
- * IBM_DB driver and IBM_DB_DBI wrapper 1.0 or higher 
+ * Python 2.7 or newer versions except python 3.3
+ * Django Framework Minimun 1.7.x  and Maximum 2.0
+ * IBM_DB driver and IBM_DB_DBI wrapper 1.0 or higher
+   ``` 
+    Install ibm_db driver with below commands:
+	    Linux and Windows: 
+	      pip install ibm_db
+	    Mac:
+   	    pip install --no-cache-dir ibm_db
+   ```
  
 # Installation 
 
@@ -27,7 +34,7 @@ Install Django as per instructions from the Django [http://docs.djangoproject.co
 ## 2. Install DB2 Django adapter (ibm_db_django)  
 
 ```  
-$ pip install ibm_db_django  
+$ pip install ibm_db_django==1.2.0.0a0  
 ```
  
 # Tested Operating Systems 
