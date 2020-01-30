@@ -27,14 +27,14 @@ LICENSE = 'Apache License 2.0'
 extra = {}
 if sys.version_info >= (3, ):
     extra['use_2to3'] = True
-    
+
 setup (
     name              = PACKAGE,
     version           = VERSION,
     license           = LICENSE,
     platforms         = 'All',
     install_requires  = _IS_JYTHON and ['django>=1.0.3'] or ['ibm_db>=1.0.3',
-                          'django>=1.0.3'],
+                          'django>=1.0.3', 'six'],
     dependency_links  = _IS_JYTHON and ['http://pypi.python.org/pypi/Django/'] or ['http://pypi.python.org/pypi/ibm_db/',
                           'http://pypi.python.org/pypi/Django/'],
     description       = 'DB2 support for Django framework.',

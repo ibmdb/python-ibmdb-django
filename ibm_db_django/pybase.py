@@ -35,9 +35,9 @@ if ( djangoVersion[0:2] >= ( 1, 4) ):
     import warnings
 if ( djangoVersion[0:2] >= ( 1, 5 )):
     from django.utils.encoding import force_bytes, force_text
-    from django.utils import six
+    import six
     import re
- 
+
 _IS_JYTHON = sys.platform.startswith( 'java' )
 if _IS_JYTHON:
     dbms_name = 'dbname'
@@ -54,15 +54,15 @@ if ( djangoVersion[0:2] >= ( 1, 6 )):
     InternalError = Database.InternalError
     ProgrammingError = Database.ProgrammingError
     NotSupportedError = Database.NotSupportedError
-    
+
 class DatabaseWrapper( object ):
-    # Get new database connection for non persistance connection 
+    # Get new database connection for non persistance connection
     def get_new_connection(self, kwargs):
         SchemaFlag= False
         kwargsKeys = kwargs.keys()
-        if ( kwargsKeys.__contains__( 'port' ) and 
+        if ( kwargsKeys.__contains__( 'port' ) and
             kwargsKeys.__contains__( 'host' ) ):
-            kwargs['dsn'] = "DATABASE=%s;HOSTNAME=%s;PORT=%s;PROTOCOL=TCPIP;" % ( 
+            kwargs['dsn'] = "DATABASE=%s;HOSTNAME=%s;PORT=%s;PROTOCOL=TCPIP;" % (
                      kwargs.get( 'database' ),
                      kwargs.get( 'host' ),
                      kwargs.get( 'port' )
@@ -107,12 +107,12 @@ class DatabaseWrapper( object ):
             del kwargs['options']
         if kwargsKeys.__contains__( 'port' ):
             del kwargs['port']
-        
+
         pconnect_flag = False
         if kwargsKeys.__contains__( 'PCONNECT' ):
             pconnect_flag = kwargs['PCONNECT']
             del kwargs['PCONNECT']
-            
+
         if pconnect_flag:
             connection = Database.pconnect( **kwargs )
         else:
@@ -121,48 +121,48 @@ class DatabaseWrapper( object ):
 
         if SchemaFlag:
             schema = connection.set_current_schema(currentschema)
-        
+
         return connection
-    
+
     def is_active( self, connection = None ):
         return Database.ibm_db.active(connection.conn_handler)
-        
+
     # Over-riding _cursor method to return DB2 cursor.
     def _cursor( self, connection ):
         return DB2CursorWrapper( connection )
-                    
+
     def close( self, connection ):
         connection.close()
-        
+
     def get_server_version( self, connection ):
         self.connection = connection
         if not self.connection:
             self.cursor()
         return tuple( int( version ) for version in self.connection.server_info()[1].split( "." ) )
-    
+
 class DB2CursorWrapper( Database.Cursor ):
-        
+
     """
     This is the wrapper around IBM_DB_DBI in order to support format parameter style
-    IBM_DB_DBI supports qmark, where as Django support format style, 
-    hence this conversion is required. 
+    IBM_DB_DBI supports qmark, where as Django support format style,
+    hence this conversion is required.
     """
-    
-    def __init__( self, connection ): 
+
+    def __init__( self, connection ):
         super( DB2CursorWrapper, self ).__init__( connection.conn_handler, connection )
-        
+
     def __iter__( self ):
         return self
-        
+
     def next( self ):
         row = self.fetchone()
         if row == None:
             raise StopIteration
         return row
-    
+
     def _create_instance(self, connection):
         return DB2CursorWrapper(connection)
-        
+
     def _format_parameters( self, parameters ):
         parameters = list( parameters )
         for index in range( len( parameters ) ):
@@ -179,8 +179,8 @@ class DB2CursorWrapper( Database.Cursor ):
                 param = param.astimezone(timezone.utc).replace(tzinfo=None)
                 parameters[index] = param
         return tuple( parameters )
-                
-    # Over-riding this method to modify SQLs which contains format parameter to qmark. 
+
+    # Over-riding this method to modify SQLs which contains format parameter to qmark.
     def execute( self, operation, parameters = () ):
         if( djangoVersion[0:2] >= (2 , 0)):
             operation = str(operation)
@@ -197,19 +197,19 @@ class DB2CursorWrapper( Database.Cursor ):
                 operation = operation % ( tuple( "?" * operation.count( "%s" ) ) )
             if ( djangoVersion[0:2] >= ( 1, 4 ) ):
                 parameters = self._format_parameters( parameters )
-                
+
             if ( djangoVersion[0:2] <= ( 1, 1 ) ):
                 if ( doReorg == 1 ):
                     super( DB2CursorWrapper, self ).execute( operation, parameters )
                     return self._reorg_tables()
-                else:    
+                else:
                     return super( DB2CursorWrapper, self ).execute( operation, parameters )
             else:
                 try:
                     if ( doReorg == 1 ):
                         super( DB2CursorWrapper, self ).execute( operation, parameters )
                         return self._reorg_tables()
-                    else:    
+                    else:
                         return super( DB2CursorWrapper, self ).execute( operation, parameters )
                 except IntegrityError as e:
                     if (djangoVersion[0:2] >= (1, 5)):
@@ -217,7 +217,7 @@ class DB2CursorWrapper( Database.Cursor ):
                         raise
                     else:
                         raise utils.IntegrityError, utils.IntegrityError( *tuple( e ) ), sys.exc_info()[2]
-                        
+
                 except ProgrammingError as e:
                     if (djangoVersion[0:2] >= (1, 5)):
                         six.reraise(utils.ProgrammingError, utils.ProgrammingError( *tuple( six.PY3 and e.args or ( e._message, ) ) ), sys.exc_info()[2])
@@ -232,7 +232,7 @@ class DB2CursorWrapper( Database.Cursor ):
                         raise utils.DatabaseError, utils.DatabaseError( *tuple( e ) ), sys.exc_info()[2]
         except ( TypeError ):
             return None
-        
+
     # Over-riding this method to modify SQLs which contains format parameter to qmark.
     def executemany( self, operation, seq_parameters ):
         try:
@@ -242,7 +242,7 @@ class DB2CursorWrapper( Database.Cursor ):
                 operation = operation % ( tuple( "?" * operation.count( "%s" ) ) )
             if ( djangoVersion[0:2] >= ( 1, 4 ) ):
                 seq_parameters = [ self._format_parameters( parameters ) for parameters in seq_parameters ]
-                
+
             if ( djangoVersion[0:2] <= ( 1, 1 ) ):
                 return super( DB2CursorWrapper, self ).executemany( operation, seq_parameters )
             else:
@@ -262,7 +262,7 @@ class DB2CursorWrapper( Database.Cursor ):
                         raise utils.DatabaseError, utils.DatabaseError( *tuple( e ) ), sys.exc_info()[2]
         except ( IndexError, TypeError ):
             return None
-    
+
     # table reorganization method
     def _reorg_tables( self ):
         checkReorgSQL = "select TABSCHEMA, TABNAME from SYSIBMADM.ADMINTABINFO where REORG_PENDING = 'Y'"
@@ -277,7 +277,7 @@ class DB2CursorWrapper( Database.Cursor ):
                 reorgSQLs.append(reorgSQL)
             for sql in reorgSQLs:
                 super( DB2CursorWrapper, self ).execute(sql)
-    
+
     # Over-riding this method to modify result set containing datetime and time zone support is active
     def fetchone( self ):
         row = super( DB2CursorWrapper, self ).fetchone()
@@ -285,7 +285,7 @@ class DB2CursorWrapper( Database.Cursor ):
             return row
         else:
             return self._fix_return_data( row )
-    
+
     # Over-riding this method to modify result set containing datetime and time zone support is active
     def fetchmany( self, size=0 ):
         rows = super( DB2CursorWrapper, self ).fetchmany( size )
@@ -293,7 +293,7 @@ class DB2CursorWrapper( Database.Cursor ):
             return rows
         else:
             return [self._fix_return_data( row ) for row in rows]
-    
+
     # Over-riding this method to modify result set containing datetime and time zone support is active
     def fetchall( self ):
         rows = super( DB2CursorWrapper, self ).fetchall()
@@ -301,8 +301,8 @@ class DB2CursorWrapper( Database.Cursor ):
             return rows
         else:
             return [self._fix_return_data( row ) for row in rows]
-        
-    # This method to modify result set containing datetime and time zone support is active   
+
+    # This method to modify result set containing datetime and time zone support is active
     def _fix_return_data( self, row ):
         row = list( row )
         index = -1
