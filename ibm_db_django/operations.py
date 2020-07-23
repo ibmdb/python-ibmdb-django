@@ -116,17 +116,9 @@ class DatabaseOperations ( BaseDatabaseOperations ):
             return 'POWER(%s, %s)' % ( sub_expressions[0], sub_expressions[1] )
         elif operator == '-':
             if( djangoVersion[0:2] >= ( 2 , 0) ):
-                strr= str(sub_expressions[1])
-                sub_expressions[1] = strr.replace('+', '-')
-            else:
-                sub_expressions[1] = str.replace('+', '-')
+                sub_expressions[1] = str(sub_expressions[1]).replace('+', '-')
             return super( DatabaseOperations, self ).combine_expression( operator, sub_expressions )
         else:
-            if( djangoVersion[0:2] >= (2 , 0)):
-                strr= str(sub_expressions[1])
-                sub_expressions[1]=strr.replace('+', '-')
-            else:
-                sub_expressions[1] = str.replace('+', '-')
             return super( DatabaseOperations, self ).combine_expression( operator, sub_expressions )
     
     if( djangoVersion[0:2] >= ( 1, 8 ) ):
