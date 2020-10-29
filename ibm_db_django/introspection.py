@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2018.                                      |
+# | (C) Copyright IBM Corporation 2009-2020.                                      |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -53,6 +53,7 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
             Database.DATE :             "DateField",
             Database.TIME :             "TimeField",
             Database.DATETIME :         "DateTimeField",
+            Database.BOOLEAN:           "BooleanField",
         }    
         if(djangoVersion[0:2] > (1, 1)):
             data_types_reverse[Database.BINARY] = "BinaryField"
@@ -83,18 +84,24 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
         }
      
     def get_field_type(self, data_type, description):
-        if (djangoVersion[0:2] < ( 2, 0) ): 
-            if not _IS_JYTHON:
-                if data_type == Database.NUMBER:
-                    if description.precision == 5:
-                        return 'SmallIntegerField'
-        else:
-            return super(DatabaseIntrospection, self).get_field_type(data_type, description)
+        if data_type == Database.NUMBER and not _IS_JYTHON:
+            if description.precision == 5:
+                return 'SmallIntegerField'
+
+        return super(DatabaseIntrospection, self).get_field_type(data_type, description)
     
     # Converting table name to lower case.
     def table_name_converter ( self, name ):        
         return name.lower()
     
+    def identifier_converter(self, name):
+        """
+        Apply a conversion to the identifier for the purposes of comparison.
+
+        The default identifier converter is for case sensitive comparison.
+        """
+        return name.upper()
+
     # Getting the list of all tables, which are present under current schema.
     def get_table_list ( self, cursor ):
         TableInfo = namedtuple('TableInfo', ['name', 'type'])
@@ -104,7 +111,7 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                 if( djangoVersion[0:2] < ( 1, 8 ) ):
                     table_list.append( table['TABLE_NAME'].lower() )
                 else:
-                    table_list.append(TableInfo( table['TABLE_NAME'].lower(),'t'))
+                    table_list.append(TableInfo( table['TABLE_NAME'].lower(),'t' if table['TABLE_TYPE'] == 'TABLE' else 'v'))
         else:
             cursor.execute( "select current_schema from sysibm.sysdummy1" )
             schema = cursor.fetchone()[0]
@@ -124,7 +131,7 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
         if not _IS_JYTHON:
             schema = cursor.connection.get_current_schema()
             for fk in cursor.connection.foreign_keys( True, schema, table_name ):
-                relations[self.__get_col_index( cursor, schema, table_name, fk['FKCOLUMN_NAME'] )] = ( self.__get_col_index( cursor, schema, fk['PKTABLE_NAME'], fk['PKCOLUMN_NAME'] ), fk['PKTABLE_NAME'].lower() )
+                relations[fk['FKCOLUMN_NAME'].lower()] = ( fk['PKCOLUMN_NAME'].lower() , fk['PKTABLE_NAME'].lower() )
         else:
             cursor.execute( "select current_schema from sysibm.sysdummy1" )
             schema = cursor.fetchone()[0]
@@ -235,6 +242,13 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
         qn = self.connection.ops.quote_name
         description = []
         table_type = 'T'
+
+        sql = "SELECT count(1) FROM SYSIBM.SYSTABLES WHERE NAME = '%s' AND TYPE = '%s'" % (table_name.upper(), table_type)
+        cursor.execute(sql)
+        table_exist = cursor.fetchone()[0]
+        if table_exist == 0:
+            return description
+
         if not _IS_JYTHON:
             dbms_name='dbms_name'
             schema = cursor.connection.get_current_schema()
@@ -250,8 +264,18 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
 
         if table_type != 'X':
             cursor.execute( "SELECT * FROM %s FETCH FIRST 1 ROWS ONLY" % qn( table_name ) )
-            for desc in cursor.description:
-                description.append( [ desc[0].lower(), ] + desc[1:] )
+            return [
+                FieldInfo(
+                    desc[0].lower(), #name
+                    desc[1], #type_code
+                    desc[2], #display_size
+                    desc[3], #internal_size
+                    desc[4], #precision
+                    desc[5], #scale
+                    desc[6], #null_ok
+                    None,    #default
+                    ) for desc in cursor.description ]
+
         return description
 
     def get_constraints(self, cursor, table_name):
@@ -268,6 +292,7 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                 sql = "SELECT CHECKNAME, COLNAME FROM SYSIBM.SYSCHECKDEP WHERE TBOWNER='%(schema)s' AND TBNAME='%(table)s'" % {'schema': schema.upper(), 'table': table_name.upper()}
             cursor.execute(sql)
             for constname, colname in cursor.fetchall():
+                constname = constname.lower()
                 if constname not in constraints:
                     constraints[constname] = {
                         'columns': [],
@@ -287,6 +312,7 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                 sql = "SELECT KEYCOL.CONSTNAME, KEYCOL.COLNAME FROM SYSIBM.SYSKEYCOLUSE KEYCOL INNER JOIN SYSIBM.SYSTABCONST TABCONST ON KEYCOL.CONSTNAME=TABCONST.CONSTNAME WHERE TABCONST.TBCREATOR='%(schema)s' AND TABCONST.TBNAME='%(table)s' AND TABCONST.TYPE='U'" % {'schema': schema.upper(), 'table': table_name.upper()}
             cursor.execute(sql)
             for constname, colname in cursor.fetchall():
+                constname = constname.lower()
                 if constname not in constraints:
                     constraints[constname] = {
                         'columns': [],
@@ -299,6 +325,7 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                 constraints[constname]['columns'].append(colname.lower())
             
             for pkey in cursor.connection.primary_keys(None, schema, table_name):
+                pkey['PK_NAME'] = pkey['PK_NAME'].lower()
                 if pkey['PK_NAME'] not in constraints:
                     constraints[pkey['PK_NAME']] = {
                         'columns': [],
@@ -311,6 +338,7 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                 constraints[pkey['PK_NAME']]['columns'].append(pkey['COLUMN_NAME'].lower())    
             
             for fk in cursor.connection.foreign_keys( True, schema, table_name ):
+                fk['FK_NAME'] = fk['FK_NAME'].lower()
                 if fk['FK_NAME'] not in constraints:
                     constraints[fk['FK_NAME']] = {
                         'columns': [],
@@ -325,22 +353,32 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                     fkeylist = list(constraints[fk['FK_NAME']]['foreign_key'])
                     fkeylist.append(fk['PKCOLUMN_NAME'].lower())
                     constraints[fk['FK_NAME']]['foreign_key'] = tuple(fkeylist)
-                
-            for index in cursor.connection.indexes( True, schema, table_name ):
-                if index['INDEX_NAME'] not in constraints:
-                    constraints[index['INDEX_NAME']] = {
+
+            sql = "SELECT INDNAME, COLNAMES, UNIQUERULE, INDEXTYPE from SYSCAT.INDEXES where TABNAME = '%s'" % table_name.upper()
+            cursor.execute(sql)
+            for INDEX_NAME, COLUMN_NAME, UNIQUE_RULE, INDEX_TYPE in cursor.fetchall():
+                INDEX_NAME = INDEX_NAME.lower()
+                COLUMN_NAME = COLUMN_NAME.lower()
+                if INDEX_NAME not in constraints:
+                    constraints[INDEX_NAME] = {
                         'columns': [],
-                        'primary_key': False,
+                        'primary_key': True if UNIQUE_RULE == 'P' else False,
                         'unique': False,
                         'foreign_key': None,
                         'check': False,
-                        'index': True
+                        'index': True,
+                        'type': 'idx' if INDEX_TYPE == 'REG ' else INDEX_TYPE
                     }
-                elif constraints[index['INDEX_NAME']]['unique'] :
+                elif constraints[INDEX_NAME]['unique'] :
                     continue
-                elif constraints[index['INDEX_NAME']]['primary_key']:
+                elif constraints[INDEX_NAME]['primary_key']:
                     continue
-                constraints[index['INDEX_NAME']]['columns'].append(index['COLUMN_NAME'].lower())
+                if COLUMN_NAME.startswith('+'):
+                    COLUMN_NAME = COLUMN_NAME.split('+')
+                    COLUMN_NAME.pop(0)
+                constraints[INDEX_NAME]['columns'] = COLUMN_NAME
+                constraints[INDEX_NAME]['orders'] = ['ASC'] * len(COLUMN_NAME)
+
             return constraints
 
     def get_sequences(self,cursor, table_name,table_fields=()):
@@ -353,3 +391,28 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                seq_list.append({'table':table_name, 'column': f.column})
                break
         return seq_list
+
+    def sequence_list(self):
+        """
+        Return a list of information about all DB sequences for all models in
+        all apps.
+        """
+        from django.apps import apps
+        from django.db import router
+
+        sequence_list = []
+        with self.connection.cursor() as cursor:
+            for app_config in apps.get_app_configs():
+                for model in router.get_migratable_models(app_config, self.connection.alias):
+                    if not model._meta.managed:
+                        continue
+                    if model._meta.swapped:
+                        continue
+                    sequence_list.extend(self.get_sequences(cursor, model._meta.db_table, model._meta.local_fields))
+                    for f in model._meta.local_many_to_many:
+                        # If this is an m2m using an intermediate table,
+                        # we don't need to reset the sequence.
+                        if f.remote_field.through._meta.auto_created:
+                            sequence = self.get_sequences(cursor, f.m2m_db_table(), f.remote_field.through._meta.concrete_fields)
+                            sequence_list.extend(sequence or [{'table': f.m2m_db_table(), 'column': None}])
+        return sequence_list

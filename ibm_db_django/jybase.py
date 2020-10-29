@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2018.                                      |
+# | (C) Copyright IBM Corporation 2009-2020.                                      |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -49,7 +49,7 @@ class DatabaseWrapper( object ):
             host = kwargs.get( 'host' ) or 'localhost'
             port = kwargs.get( 'port' ) and ( ':%s' % kwargs.get( 'port' )) or ''
             DriverType = 4
-            kwargsKeys = kwargs.keys()
+            kwargsKeys = list(kwargs.keys())
             if kwargsKeys.__contains__( 'DriverType' ):
                 DriverType = kwargs['DriverType']
             if DriverType == 4:
@@ -62,7 +62,7 @@ class DatabaseWrapper( object ):
             # for Setting default AUTO COMMIT off on connection.
             autocommit = False
             
-            if kwargs.get( 'options' ) and kwargs.get( 'options' ).keys().__contains__( 'autocommit' ):
+            if kwargs.get( 'options' ) and list(kwargs.get( 'options' ).keys()).__contains__( 'autocommit' ):
                 autocommit = kwargs.get( 'options' ).get( 'autocommit' )
                 del kwargs.get( 'options' )['autocommit']
                 

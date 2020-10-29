@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2018.                                      |
+# | (C) Copyright IBM Corporation 2009-2020.                                      |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -21,10 +21,12 @@ try:
     from django.db.backends import BaseDatabaseOperations
 except ImportError:
     from django.db.backends.base.operations import BaseDatabaseOperations
-
+from django.utils.duration import duration_microseconds
 from ibm_db_django import query
 from django import VERSION as djangoVersion
-import sys, datetime
+import sys, datetime, uuid
+from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime, parse_time
 try:
     import pytz
 except ImportError:
@@ -44,6 +46,7 @@ else:
     dbms_name = 'dbms_name'
     
 class DatabaseOperations ( BaseDatabaseOperations ):
+    cast_char_field_without_max_length = 'varchar'
     def __init__( self, connection ):
         if( djangoVersion[0:2] >= ( 1, 4 ) ):
             super( DatabaseOperations, self ).__init__(self)
@@ -77,13 +80,39 @@ class DatabaseOperations ( BaseDatabaseOperations ):
         #DB2 doesn't have sample variance function
         elif aggregate.sql_function == 'VAR_SAMP':
             raise NotImplementedError("sample variance function not supported")
+
+    def adapt_timefield_value(self, value):
+        """
+        Transform a time value to an object compatible with what is expected
+        by the backend driver for time columns.
+        """
+        if value is None:
+            return None
+
+        # Expression values are adapted by the database.
+        if hasattr(value, 'resolve_expression'):
+            return value
         
+        if timezone.is_aware(value):
+            raise ValueError("Django does not support timezone-aware times.")
+        return "%02d:%02d:%02d" % (value.hour, value.minute, value.second)
+
     def get_db_converters(self, expression):
-        converters =super(DatabaseOperations, self).get_db_converters(expression)
+        converters = super(DatabaseOperations, self).get_db_converters(expression)
         
         field_type = expression.output_field.get_internal_type()
         if field_type in ( 'BinaryField',  ):
-            converters.append(self.convert_binaryfield_value)   
+            converters.append(self.convert_binaryfield_value)
+        elif field_type in ('NullBooleanField', 'BooleanField'):
+            converters.append(self.convert_booleanfield_value)
+        elif field_type == 'UUIDField':
+            converters.append(self.convert_uuidfield_value)
+        elif field_type == 'DateTimeField':
+            converters.append(self.convert_datetimefield_value)
+        elif field_type == 'DateField':
+            converters.append(self.convert_datefield_value)
+        elif field_type == 'TimeField':
+            converters.append(self.convert_timefield_value)
         #  else:
         #   converters.append(self.convert_empty_values)
         """Get a list of functions needed to convert field data.
@@ -93,6 +122,34 @@ class DatabaseOperations ( BaseDatabaseOperations ):
         """
         return converters
     
+    def convert_datetimefield_value(self, value, expression, connection):
+        if value is not None:
+            if not isinstance(value, datetime.datetime):
+                value = parse_datetime(value)
+            if settings.USE_TZ and not timezone.is_aware(value):
+                value = timezone.make_aware(value, self.connection.timezone)
+        return value
+
+    def convert_datefield_value(self, value, expression, connection):
+        if value is not None:
+            if not isinstance(value, datetime.date):
+                value = parse_date(value)
+        return value
+
+    def convert_timefield_value(self, value, expression, connection):
+        if value is not None:
+            if not isinstance(value, datetime.time):
+                value = parse_time(value)
+        return value
+
+    def convert_uuidfield_value(self, value, expression, connection):
+        if value is not None:
+            value = uuid.UUID(value)
+        return value
+
+    def convert_booleanfield_value(self, value, expression, connection):
+        return bool(value) if value in (1, 0) else value
+
     def convert_empty_values(self, value, expression, context):
         # Oracle stores empty strings as null. We need to undo this in
         # order to adhere to the Django convention of using the empty
@@ -105,6 +162,26 @@ class DatabaseOperations ( BaseDatabaseOperations ):
                 value = b''
         return value
     
+    def adapt_datetimefield_value(self, value):
+        if value is None:
+            return None
+
+        # Expression values are adapted by the database.
+        if hasattr(value, 'resolve_expression'):
+            return value
+
+        return 'TIMESTAMP(\'' + str(value) +'\')'
+
+    def adapt_datefield_value(self, value):
+        """
+        Transform a date value to an object compatible with what is expected
+        by the backend driver for date columns.
+        """
+        if value is None:
+            return None
+
+        return 'DATE(\'' + str(value) +'\')'
+
     def combine_expression( self, operator, sub_expressions ):
         if operator == '%%':
             return 'MOD(%s, %s)' % ( sub_expressions[0], sub_expressions[1] ) 
@@ -122,25 +199,11 @@ class DatabaseOperations ( BaseDatabaseOperations ):
                 sub_expressions[1] = str.replace('+', '-')
             return super( DatabaseOperations, self ).combine_expression( operator, sub_expressions )
         else:
-            if( djangoVersion[0:2] >= (2 , 0)):
-                strr= str(sub_expressions[1])
-                sub_expressions[1]=strr.replace('+', '-')
-            else:
-                sub_expressions[1] = str.replace('+', '-')
             return super( DatabaseOperations, self ).combine_expression( operator, sub_expressions )
     
-    if( djangoVersion[0:2] >= ( 1, 8 ) ):
-        def convert_binaryfield_value( self,value, expression,connections, context ):
-            return value    
-    else:
-        def convert_binaryfield_value( self,value, expression, context ):
-        # field_type = field.get_internal_type()
-        # if field_type in ( 'BooleanField', 'NullBooleanField' ):
-        #    if value in ( 0, 1 ):
-        #       return bool( value )
-        #else:
-            return value
- 
+    def convert_binaryfield_value( self,value, expression,connections ):
+        return value
+
     if( djangoVersion[0:2] >= ( 1, 8 ) ):
         def format_for_duration_arithmetic(self, sql):
             return ' %s MICROSECONDS' % sql
@@ -150,6 +213,10 @@ class DatabaseOperations ( BaseDatabaseOperations ):
     def date_extract_sql( self, lookup_type, field_name ):
         if lookup_type.upper() == 'WEEK_DAY':
             return " DAYOFWEEK(%s) " % ( field_name )
+        elif lookup_type.upper() == 'ISO_YEAR':
+            return " TO_CHAR(%s, 'IYYY')" % field_name
+        elif lookup_type.upper() == 'WEEK':
+            return " WEEK_ISO(%s) " % field_name
         else:
             return " %s(%s) " % ( lookup_type.upper(), field_name )
     
@@ -180,56 +247,48 @@ class DatabaseOperations ( BaseDatabaseOperations ):
                 field_name = "%s - %s HOURS - %s MINUTES" % (field_name, -hr, -min)
             else:
                 field_name = "%s + %s HOURS + %s MINUTES" % (field_name, hr, min)
-                
-        if lookup_type.upper() == 'WEEK_DAY':
-            return " DAYOFWEEK(%s) " % ( field_name ), []
-        else:
-            return " %s(%s) " % ( lookup_type.upper(), field_name ), []
+
+        return self.date_extract_sql(lookup_type, field_name)
             
     # Truncating the date value on the basic of lookup type.
     # e.g If input is 2008-12-04 and month then output will be 2008-12-01 00:00:00
     # Reference: http://www.ibm.com/developerworks/data/library/samples/db2/0205udfs/index.html
     def date_trunc_sql( self, lookup_type, field_name ):
-        sql = "TIMESTAMP(DATE(SUBSTR(CHAR(%s), 1, %d) || '%s'), TIME('00:00:00'))"
-        if lookup_type.upper() == 'DAY':
-            sql = sql % ( field_name, 10, '' )
-        elif lookup_type.upper() == 'MONTH':
-            sql = sql % ( field_name, 7, '-01' )
-        elif lookup_type.upper() == 'YEAR':
-            sql = sql % ( field_name, 4, '-01-01' )
-        if( djangoVersion[0:2] < ( 1, 6 ) ):
-            return sql
-        else:
-            return sql
+        return "DATE_TRUNC('%s', %s)" % (lookup_type, field_name)
     
     # Truncating the time zone-aware timestamps value on the basic of lookup type
     def datetime_trunc_sql( self, lookup_type, field_name, tzname ):
-        sql = "TIMESTAMP(SUBSTR(CHAR(%s), 1, %d) || '%s')"
-        if settings.USE_TZ:
+        if settings.USE_TZ: #Timezone not supported in DB2 LUW
             hr, min = self._get_utcoffset(tzname)
             if hr < 0:
                 field_name = "%s - %s HOURS - %s MINUTES" % (field_name, -hr, -min)
             else:
                 field_name = "%s + %s HOURS + %s MINUTES" % (field_name, hr, min)
-        if lookup_type.upper() == 'SECOND':
-            sql = sql % ( field_name, 19, '.000000' )
-        if lookup_type.upper() == 'MINUTE':
-            sql = sql % ( field_name, 16, '.00.000000' )
-        elif lookup_type.upper() == 'HOUR':
-            sql = sql % ( field_name, 13, '.00.00.000000' )
-        elif lookup_type.upper() == 'DAY':
-            sql = sql % ( field_name, 10, '-00.00.00.000000' )
-        elif lookup_type.upper() == 'MONTH':
-            sql = sql % ( field_name, 7, '-01-00.00.00.000000' )
-        elif lookup_type.upper() == 'YEAR':
-            sql = sql % ( field_name, 4, '-01-01-00.00.00.000000' )
-        return sql, []
-        
+        return self.date_trunc_sql(lookup_type, field_name)
+
+    def time_trunc_sql(self, lookup_type, field_name):
+        return "DATE_TRUNC('%s', %s)::time" % (lookup_type, field_name)
+
+    def datetime_cast_date_sql(self, field_name, tzname):
+        if settings.USE_TZ: #Timezone not supported in DB2 LUW
+            pass
+        return '(%s)::date' % field_name
+
+    def datetime_cast_time_sql(self, field_name, tzname):
+        if settings.USE_TZ: #Timezone not supported in DB2 LUW
+            pass
+        return "VARCHAR_FORMAT(%s, 'HH24:MI:SS.US')" % field_name
+
     if( djangoVersion[0:2] >= ( 1, 8 ) ): 
-        def date_interval_sql( self, timedelta ):    
-            return " %d days + %d seconds + %d microseconds" % (
-                timedelta.days, timedelta.seconds, timedelta.microseconds), []
-          
+        def date_interval_sql( self, timedelta ):
+            if(timedelta.days and timedelta.seconds and timedelta.microseconds):
+                return " %d days + %d seconds + %d microseconds" % (
+                timedelta.days, timedelta.seconds, timedelta.microseconds)
+            elif(timedelta.seconds or timedelta.microseconds):
+                ms = duration_microseconds(timedelta)
+                return ' %s MICROSECONDS' % ms
+            else:
+                return str( timedelta.days ) + " DAYS"
     else:
         def date_interval_sql( self, sql, connector, timedelta ):
             date_interval_token = []
@@ -530,7 +589,7 @@ class DatabaseOperations ( BaseDatabaseOperations ):
                     value = value.astimezone( utc ).replace( tzinfo=None )
                 else:
                     raise ValueError( "Timezone aware datetime not supported" )
-            return unicode( value )
+            return str( value )
         
     def value_to_db_time( self, value ):
         if value is None:
@@ -553,23 +612,16 @@ class DatabaseOperations ( BaseDatabaseOperations ):
             lower_bound = datetime.date(int(value), 1, 1)
             upper_bound = datetime.date(int(value), 12, 31)
         else:
-            lower_bound = datetime.date(long(value), 1, 1)
-            upper_bound = datetime.date(long(value), 12, 31)
+            lower_bound = datetime.date(int(value), 1, 1)
+            upper_bound = datetime.date(int(value), 12, 31)
         return [lower_bound, upper_bound]
     
     def bulk_insert_sql(self, fields, num_values):
-        if sys.version_info.major >= 3:
-            var_param=(int)
-        else:
-            var_param=(int,long)
-        values_sql = "( %s )" %(", ".join( ["%s"] * len(fields)))
-        if isinstance(num_values,var_param):
-            bulk_values_sql = "VALUES " + ", ".join([values_sql] * (num_values) )
-        else:
-            bulk_values_sql = "VALUES " + ", ".join([values_sql] * len(num_values) )
-        return bulk_values_sql
+        placeholder_rows_sql = (", ".join(row) for row in num_values)
+        values_sql = ", ".join("(%s)" % sql for sql in placeholder_rows_sql)
+        return "VALUES " + values_sql
     
-    def for_update_sql(self, nowait=False):
+    def for_update_sql(self, nowait=False, skip_locked=False, of=()):
         #DB2 doesn't support nowait select for update
         if nowait:
             if ( djangoVersion[0:2] > ( 1, 1 ) ):
@@ -579,8 +631,8 @@ class DatabaseOperations ( BaseDatabaseOperations ):
         else:
             return 'WITH RS USE AND KEEP UPDATE LOCKS'
 
-    def distinct_sql(self, fields):
+    def distinct_sql(self, fields, params):
         if fields:
             raise ValueError( "distinct_on_fields not supported" )
         else:
-            return 'DISTINCT'
+            return ['DISTINCT'], []
