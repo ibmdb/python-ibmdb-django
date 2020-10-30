@@ -1,5 +1,9 @@
 Change Log
 =============
+2020/10/30
+-Added Support for Django2.2
+-Update version to 1.3.0.0 
+
 2018/02/20
 -Added Support for Django2.0 ,with backward compatibility
 -Update version to 1.2.0.0

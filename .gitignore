@@ -1,0 +1,6 @@
+build
+dist
+ibm_db_django.egg-info
+*.pyc
+*.jpg
+*.png
