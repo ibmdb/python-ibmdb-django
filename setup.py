@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2014.                                      |
+# | (C) Copyright IBM Corporation 2009-2020.                                      |
 # +--------------------------------------------------------------------------+
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
 # | you may not use this file except in compliance with the License.         |
@@ -33,8 +33,8 @@ setup (
     version           = VERSION,
     license           = LICENSE,
     platforms         = 'All',
-    install_requires  = _IS_JYTHON and ['django>=1.0.3'] or ['ibm_db>=1.0.3',
-                          'django>=1.0.3'],
+    install_requires  = _IS_JYTHON and ['django==2.2'] or ['ibm_db>=3.0.1',
+                          'django==2.2'],
     dependency_links  = _IS_JYTHON and ['http://pypi.python.org/pypi/Django/'] or ['http://pypi.python.org/pypi/ibm_db/',
                           'http://pypi.python.org/pypi/Django/'],
     description       = 'DB2 support for Django framework.',

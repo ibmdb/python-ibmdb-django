@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2018.                                      |
+# | (C) Copyright IBM Corporation 2009-2020.                                      |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -15,6 +15,8 @@
 # +--------------------------------------------------------------------------+
 # | Authors: Ambrish Bhargava, Tarun Pasrija, Rahul Priyadarshi              |
 # +--------------------------------------------------------------------------+
+#from builtins import True
+from _ast import Or
 
 # Importing IBM_DB wrapper ibm_db_dbi
 try:
@@ -22,6 +24,9 @@ try:
     import ibm_db
 except ImportError as e:
     raise ImportError( "ibm_db module not found. Install ibm_db module from http://code.google.com/p/ibm-db/. Error: %s" % e )
+
+from decimal import Decimal
+import regex
 
 import datetime
 # For checking django's version
@@ -62,7 +67,7 @@ class DatabaseWrapper( object ):
         SchemaFlag= False
         scrollable_cursor = False
 
-        kwargsKeys = kwargs.keys()
+        kwargsKeys = list(kwargs.keys())
         if ( kwargsKeys.__contains__( 'port' ) and 
             kwargsKeys.__contains__( 'host' ) ):
             kwargs['dsn'] = "DATABASE=%s;HOSTNAME=%s;PORT=%s;PROTOCOL=TCPIP;" % ( 
@@ -75,8 +80,6 @@ class DatabaseWrapper( object ):
 
         if ( kwargsKeys.__contains__( 'currentschema' )):
             kwargs['dsn'] += "CurrentSchema=%s;" % (  kwargs.get( 'currentschema' ))
-            currentschema= kwargs.get( 'currentschema' )
-            SchemaFlag = True
             del kwargs['currentschema']
 
         if ( kwargsKeys.__contains__( 'security' )):
@@ -174,7 +177,7 @@ class DB2CursorWrapper( Database.Cursor ):
     def __iter__( self ):
         return self
         
-    def next( self ):
+    def __next__( self ):
         row = self.fetchone()
         if row == None:
             raise StopIteration
@@ -183,7 +186,21 @@ class DB2CursorWrapper( Database.Cursor ):
     def _create_instance(self, connection):
         return DB2CursorWrapper(connection)
         
-    def _format_parameters( self, parameters ):
+    #Ex: string = 'ababababababababab', sub = 'ab', wanted = 'CD', n = 5
+    #outputs: ababababCDabababab
+    def _replacenth( self, string, sub, wanted, index, need_quote):
+        where = [m.start() for m in re.finditer(sub, string)][index]
+        before = string[:where]
+        after = string[where+2:]
+        newString = before + need_quote + str(wanted) + need_quote + after
+        return newString
+
+    def _format_parameters( self, parameters, operation, return_only_param = False):
+        select_update = False
+        if re.match(r'^(SELECT|UPDATE) ', operation):
+            select_update = True
+
+        new_parameters = []
         parameters = list( parameters )
         for index in range( len( parameters ) ):
             # With raw SQL queries, datetimes can reach this function
@@ -191,20 +208,103 @@ class DB2CursorWrapper( Database.Cursor ):
             if settings.USE_TZ and isinstance( parameters[index], datetime.datetime ):
                 param = parameters[index]
                 if timezone.is_naive( param ):
-                    warnings.warn(u"Received a naive datetime (%s)"
-                              u" while time zone support is active." % param,
+                    warnings.warn("Received a naive datetime (%s)"
+                              " while time zone support is active." % param,
                               RuntimeWarning)
                     default_timezone = timezone.get_default_timezone()
                     param = timezone.make_aware( param, default_timezone )
                 param = param.astimezone(timezone.utc).replace(tzinfo=None)
                 parameters[index] = param
-        return tuple( parameters )
-                
+
+            need_quote = ''
+            if (select_update and isinstance(parameters[index], Decimal)):
+                operation = self._replacenth(operation, '%s', parameters[index], len(new_parameters), need_quote)
+            else:
+                new_parameters.append(parameters[index])
+
+        if return_only_param:
+            return tuple( new_parameters )
+
+        return tuple( new_parameters ), operation
+
+    def _resolve_parameters_in_aggregator_func(self, parameters, operation):
+        op_temp = ""
+        op_temp_wParam = ""
+        p_start = 0
+        aggr_list = ['COUNT','AVG','MIN','MAX','SUM']
+        res = any(ele in operation for ele in aggr_list)
+
+        if res:
+            for m in regex.finditer(r'(SUM|AVG|COUNT|MIN|MAX)\ *\(', operation):
+                end = m.end()
+                p_start = len(op_temp)
+                prev_str = operation[p_start:end-1]
+                op_temp = op_temp + prev_str
+                op_temp_wParam = op_temp_wParam + prev_str
+                next_str = operation[end-1:]
+                parm_count = op_temp_wParam.count('%s')
+                for item in regex.finditer(r'\((?>[^()]|(?R))*\)', next_str):
+                    start = item.start()
+                    end = item.end()
+                    str_wp = next_str[start:end]
+                    while (str_wp.count('%s') > 0):
+                        if(isinstance(parameters[parm_count], str) and
+                           (parameters[parm_count].find('DATE') != 0) and
+                           (parameters[parm_count].find('TIMESTAMP') != 0)):
+                            need_quote = "\'"
+                        else:
+                            need_quote = ''
+                        str_wp = self._replacenth(str_wp, '%s', parameters[parm_count], 0, need_quote)
+                        parameters = parameters[:parm_count] + parameters[(parm_count+1):]
+                    op_temp_wParam = op_temp_wParam + str_wp
+                    op_temp = op_temp + next_str[start:end]
+                    remg = end
+                    break
+
+            p_start = len(op_temp)
+            operation = op_temp_wParam + operation[p_start:]
+
+        return parameters, operation
+
+    def _resolve_parameters_in_expression_func(self, parameters, operation):
+        prev_end = 0
+        op_temp_wParam = ""
+        p_start = 0
+
+        if re.search(r'%s\ *\+|\+\ *%s|\ *THEN\ *%s|\ *\(?%s\)?\ *AS\ *|\ *ELSE\ *%s', operation):
+            for m in re.finditer(r'%s\ *\+|\+\ *%s|\ *THEN\ *%s|\ *\(?%s\)?\ *AS\ *|\ *ELSE\ *%s', operation):
+                p_start = m.start()
+                op_temp_wParam = op_temp_wParam + operation[prev_end:p_start]
+                parm_count = op_temp_wParam.count('%s')
+                end = m.end()
+                str_wp = operation[p_start:end]
+                if((isinstance(parameters[parm_count], str) and
+                   (parameters[parm_count].find('DATE') != 0) and
+                   (parameters[parm_count].find('TIMESTAMP') != 0)) or
+                    (isinstance(parameters[parm_count], datetime.date))):
+                    need_quote = "\'"
+                else:
+                    need_quote = ''
+                if(isinstance(parameters[parm_count], memoryview)):
+                    replace_string = "BX\'%s\'" % parameters[parm_count].obj.hex()
+                else:
+                    replace_string = parameters[parm_count]
+                str_wp = self._replacenth(str_wp, '%s', replace_string, 0, need_quote)
+                parameters = parameters[:parm_count] + parameters[(parm_count+1):]
+                op_temp_wParam = op_temp_wParam + str_wp
+                prev_end = end
+
+            operation = op_temp_wParam + operation[end:]
+
+        return parameters, operation
+
     # Over-riding this method to modify SQLs which contains format parameter to qmark. 
     def execute( self, operation, parameters = () ):
         if( djangoVersion[0:2] >= (2 , 0)):
             operation = str(operation)
         try:
+            if operation == "''":
+                operation = "SELECT NULL FROM SYSIBM.DUAL FETCH FIRST 0 ROW ONLY"
             if operation.find('ALTER TABLE') == 0 and getattr(self.connection, dbms_name) != 'DB2':
                 doReorg = 1
             else:
@@ -213,10 +313,13 @@ class DB2CursorWrapper( Database.Cursor ):
                 operation = operation.replace("db2regexExtraField(%s)", "")
                 operation = operation % parameters
                 parameters = ()
-            if operation.count( "%s" ) > 0:
-                operation = operation % ( tuple( "?" * operation.count( "%s" ) ) )
-            if ( djangoVersion[0:2] >= ( 1, 4 ) ):
-                parameters = self._format_parameters( parameters )
+
+            if operation.count( "%s" ) > 0 and parameters:
+                parameters, operation = self._resolve_parameters_in_aggregator_func(parameters, operation)
+                parameters, operation = self._format_parameters( parameters, operation )
+                parameters, operation = self._resolve_parameters_in_expression_func( parameters, operation )
+                if operation.count( "%s" ) > 0:
+                    operation = operation.replace("%s", "?")
                 
             if ( djangoVersion[0:2] <= ( 1, 1 ) ):
                 if ( doReorg == 1 ):
@@ -232,24 +335,17 @@ class DB2CursorWrapper( Database.Cursor ):
                     else:    
                         return super( DB2CursorWrapper, self ).execute( operation, parameters )
                 except IntegrityError as e:
-                    if (djangoVersion[0:2] >= (1, 5)):
-                        six.reraise(utils.IntegrityError, utils.IntegrityError( *tuple( six.PY3 and e.args or ( e._message, ) ) ), sys.exc_info()[2])
-                        raise
-                    else:
-                        raise utils.IntegrityError, utils.IntegrityError( *tuple( e ) ), sys.exc_info()[2]
+                    six.reraise(utils.IntegrityError, utils.IntegrityError( *tuple( six.PY3 and e.args or ( e._message, ) ) ), sys.exc_info()[2])
+                    raise
                         
                 except ProgrammingError as e:
-                    if (djangoVersion[0:2] >= (1, 5)):
-                        six.reraise(utils.ProgrammingError, utils.ProgrammingError( *tuple( six.PY3 and e.args or ( e._message, ) ) ), sys.exc_info()[2])
-                        raise
-                    else:
-                        raise utils.ProgrammingError, utils.ProgrammingError( *tuple( e ) ), sys.exc_info()[2]
+                    six.reraise(utils.ProgrammingError, utils.ProgrammingError( *tuple( six.PY3 and e.args or ( e._message, ) ) ), sys.exc_info()[2])
+                    raise
+
                 except DatabaseError as e:
-                    if (djangoVersion[0:2] >= (1, 5)):
-                        six.reraise(utils.DatabaseError, utils.DatabaseError( *tuple( six.PY3 and e.args or ( e._message, ) ) ), sys.exc_info()[2])
-                        raise
-                    else:
-                        raise utils.DatabaseError, utils.DatabaseError( *tuple( e ) ), sys.exc_info()[2]
+                    six.reraise(utils.DatabaseError, utils.DatabaseError( *tuple( six.PY3 and e.args or ( e._message, ) ) ), sys.exc_info()[2])
+                    raise
+
         except ( TypeError ):
             return None
         
@@ -258,10 +354,11 @@ class DB2CursorWrapper( Database.Cursor ):
         try:
             if operation.count("db2regexExtraField(%s)") > 0:
                  raise ValueError("Regex not supported in this operation")
+
+            return_only_param = True
+            seq_parameters = [ self._format_parameters( parameters, operation, return_only_param) for parameters in seq_parameters ]
             if operation.count( "%s" ) > 0:
                 operation = operation % ( tuple( "?" * operation.count( "%s" ) ) )
-            if ( djangoVersion[0:2] >= ( 1, 4 ) ):
-                seq_parameters = [ self._format_parameters( parameters ) for parameters in seq_parameters ]
                 
             if ( djangoVersion[0:2] <= ( 1, 1 ) ):
                 return super( DB2CursorWrapper, self ).executemany( operation, seq_parameters )
@@ -269,17 +366,13 @@ class DB2CursorWrapper( Database.Cursor ):
                 try:
                     return super( DB2CursorWrapper, self ).executemany( operation, seq_parameters )
                 except IntegrityError as e:
-                    if (djangoVersion[0:2] >= (1, 5)):
-                        six.reraise(utils.IntegrityError, utils.IntegrityError( *tuple( six.PY3 and e.args or ( e._message, ) ) ), sys.exc_info()[2])
-                        raise
-                    else:
-                        raise utils.IntegrityError, utils.IntegrityError( *tuple( e ) ), sys.exc_info()[2]
+                    six.reraise(utils.IntegrityError, utils.IntegrityError( *tuple( six.PY3 and e.args or ( e._message, ) ) ), sys.exc_info()[2])
+                    raise
+
                 except DatabaseError as e:
-                    if (djangoVersion[0:2] >= (1, 5)):
-                        six.reraise(utils.DatabaseError, utils.DatabaseError( *tuple( six.PY3 and e.args or ( e._message, ) ) ), sys.exc_info()[2])
-                        raise
-                    else:
-                        raise utils.DatabaseError, utils.DatabaseError( *tuple( e ) ), sys.exc_info()[2]
+                    six.reraise(utils.DatabaseError, utils.DatabaseError( *tuple( six.PY3 and e.args or ( e._message, ) ) ), sys.exc_info()[2])
+                    raise
+
         except ( IndexError, TypeError ):
             return None
     
