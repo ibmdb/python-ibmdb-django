@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2020.                                      |
+# | (C) Copyright IBM Corporation 2009-2021.                                      |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -38,11 +38,15 @@ if ( djangoVersion[0:2] >= ( 1, 4) ):
     from django.utils import timezone
     from django.conf import settings
     import warnings
-if ( djangoVersion[0:2] >= ( 1, 5 )):
+if ( djangoVersion[0:2] >= ( 1, 5 )) and ( djangoVersion[0:2] <= ( 2, 2 )):
     from django.utils.encoding import force_bytes, force_text
     from django.utils import six
     import re
- 
+elif ( djangoVersion[0:2] > ( 2, 2 )):
+    from django.utils.encoding import force_bytes, force_text
+    import six
+    import re
+
 _IS_JYTHON = sys.platform.startswith( 'java' )
 if _IS_JYTHON:
     dbms_name = 'dbname'
@@ -297,6 +301,9 @@ class DB2CursorWrapper( Database.Cursor ):
                 if operation.count( "%s" ) > 0:
                     operation = operation.replace("%s", "?")
                 
+                if operation.count( "%%" ) > 0:
+                    operation = operation.replace("%%", "%")
+            
             if ( djangoVersion[0:2] <= ( 1, 1 ) ):
                 if ( doReorg == 1 ):
                     super( DB2CursorWrapper, self ).execute( operation, parameters )
@@ -362,6 +369,8 @@ class DB2CursorWrapper( Database.Cursor ):
         res = super( DB2CursorWrapper, self ).fetchall()
         if res:
             for sName, tName in res:
+                if tName.count("\"") > 0:
+                    tName = tName.replace('"', '""')
                 reorgSQL = '''CALL SYSPROC.ADMIN_CMD('REORG TABLE "%(sName)s"."%(tName)s"')''' % {'sName': sName, 'tName': tName}
                 reorgSQLs.append(reorgSQL)
             for sql in reorgSQLs:
