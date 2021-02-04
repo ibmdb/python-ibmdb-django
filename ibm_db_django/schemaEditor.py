@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2020.                                 |
+# | (C) Copyright IBM Corporation 2009-2021.                                 |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -32,7 +32,7 @@ try:
 except ImportError:
     from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 
-from django.utils import six
+import six
 from django.db import models
 from django.db.backends.utils import truncate_name, split_identifier
 from django.db.models.fields.related import ManyToManyField
@@ -82,7 +82,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
     sql_delete_unique = "ALTER TABLE %(table)s DROP CONSTRAINT %(name)s"
     sql_drop_pk = "ALTER TABLE %(table)s DROP PRIMARY KEY"
     sql_drop_default = "ALTER TABLE %(table)s ALTER COLUMN %(column)s DROP DEFAULT"
-    sql_create_fk_add = "%(pre_sql)s ADD CONSTRAINT %(name)s FOREIGN KEY (%(column)s) REFERENCES %(to_table)s (%(to_column)s)"
+    sql_create_fk_add = "%(pre_sql)s ADD CONSTRAINT %(name)s FOREIGN KEY (%(column)s) REFERENCES %(to_table)s (%(to_column)s)%(deferrable)s"
 
     def quote_value(self, value):
         if isinstance(value, (datetime.date, datetime.time, datetime.datetime)):
@@ -196,17 +196,26 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         with self.connection.cursor() as cur:
             constraints_post = self.connection.introspection.get_constraints(cur, model._meta.db_table)
         for constr_name, constr_dict in list(constraints_pre.items()):
+            if constr_name is not None and constr_name.find('"', 1, len(constr_name)-1) > 0:
+                constr_name = constr_name.replace('"', '""')
+            columns_list = []
+            if len(constr_dict['columns']) > 0:                
+                for cols in constr_dict['columns']:
+                    if cols.find('"', 1, len(cols)-1) > 0:
+                        columns_list.append(cols.replace('"', '""'))
+                    else:
+                        columns_list.append(cols)
             if constr_name not in constraints_post.keys():
                 if constr_dict['check'] is True:
-                    deferred_constraints['check'][constr_name] = constr_dict['columns']
+                    deferred_constraints['check'][constr_name] = columns_list
                 elif constr_dict['foreign_key'] is not None:
                     deferred_constraints['fk'][constr_name] = constr_dict
                 elif constr_dict['unique'] is True:
-                    deferred_constraints['unique'][constr_name] = constr_dict['columns']
+                    deferred_constraints['unique'][constr_name] = columns_list
                 elif constr_dict['index'] is True and 'type' in constr_dict.keys():
-                    deferred_constraints['index'][constr_name] = constr_dict['columns']
+                    deferred_constraints['index'][constr_name] = columns_list
                 elif constr_dict['primary_key'] is True and 'type' not in constr_dict.keys():
-                    deferred_constraints['pk'][constr_name] = constr_dict['columns']
+                    deferred_constraints['pk'][constr_name] = columns_list
 
         return deferred_constraints
 
@@ -640,14 +649,15 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                 field.primary_key = True
                 cur = self.connection.cursor()
                 #remove other pk if available
-                for other_pk in cur.connection.primary_keys( True, cur.connection.get_current_schema(), model._meta.db_table):
+                table = model._meta.db_table.replace('""', '\"') if model._meta.db_table.count("\"") > 0 else model._meta.db_table 
+                for other_pk in cur.connection.primary_keys( True, cur.connection.get_current_schema(), table):
                     self.execute(
-                        self.sql_delete_pk % {
-                            'table': self.quote_name(model._meta.db_table),
-                            'name': other_pk['PK_NAME']
+                        self.sql_drop_pk % {                        
+                            'table': self.quote_name(model._meta.db_table),                            
                         }
                     )
-                sql = self.sql_create_pk % {'table': self.quote_name(model._meta.db_table), 'name': self._create_index_name(model._meta.db_table, [field.column], suffix="_pk"), 'columns': self.quote_name(field.column)}
+                    #Note: Need to check if we need to break from loop here after first execution.
+                sql = self.sql_create_pk % {'table': self.quote_name(model._meta.db_table), 'name': self.quote_name(self._create_index_name(model._meta.db_table, [field.column], suffix="_pk")), 'columns': self.quote_name(field.column)}
                 try:
                     self.execute(sql)
                     self._reorg_tables()
@@ -656,7 +666,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                     raise e
             elif unique:
                 constraint_name = self._create_index_name(model._meta.db_table, [field.column], suffix="_uniq")
-                sql = self.sql_create_unique % {'table': self.quote_name(model._meta.db_table), 'name': constraint_name, 'columns': self.quote_name(field.column)}
+                sql = self.sql_create_unique % {'table': self.quote_name(model._meta.db_table), 'name': constraint_name, 'columns': self.quote_name(field.column), 'deferrable': self._deferrable_constraint_sql(None)}
                 try:
                     self.execute(sql)
                     self._reorg_tables()
@@ -665,19 +675,24 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                     raise e
             if col_type_suffix:
                 cur = self.connection.cursor()
-                sql = "SELECT NAME, IDENTITY FROM SYSIBM.SYSCOLUMNS WHERE TBNAME='%(table)s' and IDENTITY='Y'" % {'table': model._meta.db_table.upper()}
                 try:
+                    table = model._meta.db_table.replace('""', '"') if model._meta.db_table.count("\"") > 0 else model._meta.db_table                    
+                    sql = "SELECT NAME, IDENTITY FROM SYSIBM.SYSCOLUMNS WHERE TBNAME='%(table)s' and IDENTITY='Y'" % {'table': table.upper()}
                     cur.execute(sql)
                     identity = cur.fetchone()
+                    
                     if identity:
-                        sql = "ALTER TABLE %(table)s ALTER COLUMN %(id)s DROP IDENTITY" % {'table': model._meta.db_table.upper(), 'id':identity[0].upper()}
+                        idy = identity[0]
+                        if idy.count("\"") > 0:
+                            idy = idy.replace('"', '""')
+                        sql = "ALTER TABLE %(table)s ALTER COLUMN %(id)s DROP IDENTITY" % {'table': self.quote_name(model._meta.db_table), 'id':self.quote_name(idy)}
                         cur.execute(sql)
-                        sql = "SELECT MAX(%(column)s) FROM %(table)s" % {'column': field.column.upper(), 'table': model._meta.db_table.upper()}
+                        sql = "SELECT MAX(%(column)s) FROM %(table)s" % {'column': self.quote_name(field.column), 'table': self.quote_name(model._meta.db_table)}
                         cur.execute(sql)
                         maxVal = cur.fetchone()
                         sql = "ALTER TABLE %(table)s ALTER COLUMN %(column)s SET GENERATED BY DEFAULT AS IDENTITY (START WITH %(maxVal)s, INCREMENT BY 1, CACHE 10 ORDER)" % {
-                            'table': model._meta.db_table.upper(),
-                            'column': field.column.upper(),
+                            'table': self.quote_name(model._meta.db_table),
+                            'column': self.quote_name(field.column),
                             'maxVal': 1 if maxVal is None or maxVal[0] is None else maxVal[0]+1}
                         cur.execute(sql)
                 except Error as e:
@@ -852,27 +867,42 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         
     def _defer_constraints_check(self, constraints, deferred_constraints, old_field, new_field, model, defer_pk=False, defer_unique=False, defer_index=False, defer_check=False, defer_fk=False, rename_table=None):
         for constr_name, constr_dict in list(constraints.items()):
-            if (old_field is not None and old_field.column in constr_dict['columns']) or rename_table is not None:
+            old_col_name = ''
+            if old_field is not None:
+                if old_field.column.count('""') > 0:
+                    old_col_name = old_field.column.replace('""', '"')
+                else:
+                    old_col_name = old_field.column
+            if constr_name is not None and constr_name.find('"', 1, len(constr_name)-1) > 0:
+                constr_name = constr_name.replace('"', '""')
+            columns_list = []
+            if len(constr_dict['columns']) > 0:                
+                for cols in constr_dict['columns']:
+                    if cols.find('"', 1, len(cols)-1) > 0:
+                        columns_list.append(cols.replace('"', '""'))
+                    else:
+                        columns_list.append(cols)
+            if (old_field is not None and old_col_name in constr_dict['columns']) or rename_table is not None:
                 if defer_check and constr_dict['check'] is True:
                     self.execute(self.sql_delete_check % {
                                         'table': self.quote_name(model._meta.db_table if rename_table is None else rename_table),
-                                        'name': constr_name.upper()
+                                        'name': self.quote_name(constr_name)
                                 })
-                    deferred_constraints['check'][constr_name] = constr_dict['columns']
+                    deferred_constraints['check'][constr_name] = columns_list
                 elif defer_index and constr_dict['index'] is True and 'type' in constr_dict.keys():
                     try:
                         self.execute(self.sql_delete_index % {
                                             'table': self.quote_name(model._meta.db_table if rename_table is None else rename_table),
-                                            'name': constr_name.upper()
+                                            'name': self.quote_name(constr_name)
                                     })
-                        deferred_constraints['index'][constr_name] = constr_dict['columns']
+                        deferred_constraints['index'][constr_name] = columns_list
                     except:
                         pass
                 elif defer_fk and constr_dict['foreign_key'] is not None:
                     try:
                         self.execute(self.sql_delete_pk % {
                                             'table': self.quote_name(model._meta.db_table if rename_table is None else rename_table),
-                                            'name': constr_name.upper()})
+                                            'name': self.quote_name(constr_name)})
                         deferred_constraints['fk'][constr_name] = constr_dict
                     except:
                         continue
@@ -880,15 +910,15 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                     try:
                         self.execute(self.sql_delete_unique % {
                                             'table': self.quote_name(model._meta.db_table if rename_table is None else rename_table),
-                                            'name': constr_name.upper()})
-                        deferred_constraints['unique'][constr_name] = constr_dict['columns']
+                                            'name': self.quote_name(constr_name)})
+                        deferred_constraints['unique'][constr_name] = columns_list
                     except:
                         continue
                 elif defer_pk and constr_dict['primary_key'] is True and 'type' not in constr_dict.keys():
-                    self.execute(self.sql_delete_pk % {
+                    self.execute(self.sql_drop_pk % {
                                         'table': self.quote_name(model._meta.db_table if rename_table is None else rename_table),
-                                        'name': constr_name.upper()})
-                    deferred_constraints['pk'][constr_name] = constr_dict['columns']
+                                        })                    
+                    deferred_constraints['pk'][constr_name] = columns_list
             
         return deferred_constraints
     
@@ -900,15 +930,15 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         for pk_name, columns in list(deferred_constraints['pk'].items()):
             self.execute(self.sql_create_pk % {
                                 'table': self.quote_name(model._meta.db_table if rename_table is None else rename_table),
-                                'name': self._create_index_name(model._meta.db_table, [new_field.column], suffix="_pk")
+                                'name': self.quote_name(self._create_index_name(model._meta.db_table, [new_field.column], suffix="_pk"))
                                         if new_field is not None else pk_name.upper(),
-                                'columns': ', '.join((column.replace(old_field.column, new_field.column) for column in columns) if not rename_table else columns).upper()})
+                                'columns': ', '.join((column.replace(old_field.column, self.quote_name(new_field.column)) for column in columns) if not rename_table else columns)})
         if 'fk' in deferred_constraints.keys():
             suffix = '_fk_%(to_table)s_%(to_column)s'
             for fk_name, constr_dict in list(deferred_constraints['fk'].items()):
                 columns = constr_dict['columns']
                 to_table = rename_table.upper() if (old_table is not None and old_table == constr_dict['foreign_key'][0]) else constr_dict['foreign_key'][0].upper()
-                to_column = new_field.column.upper() if new_field is not None else constr_dict['foreign_key'][1].upper()
+                to_column = self.quote_name(new_field.column) if new_field is not None else self.quote_name(constr_dict['foreign_key'][1])
                 from_table = model._meta.db_table if rename_table is None else rename_table
                 column = ', '.join((column.replace(old_field.column, new_field.column) for column in columns) if not rename_table else columns).upper()
                 fk_name = ForeignKeyName(from_table.upper(),
@@ -941,8 +971,9 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                 constr_name = constr_name.replace(old_table, rename_table)
             self.execute(self.sql_create_unique % {
                                 'table': self.quote_name(model._meta.db_table if rename_table is None else rename_table),
-                                'name': constr_name.upper(),
-                                'columns': ', '.join((column.replace(old_field.column, new_field.column) for column in columns) if not rename_table else columns).upper()})
+                                'name': self.quote_name(constr_name),
+                                'columns': ', '.join((column.replace(old_field.column, new_field.column) for column in columns) if not rename_table else columns).upper(),
+                                'deferrable': self._deferrable_constraint_sql(None)})
 
     def _constraint_names(self, model, column_names=None, unique=None,
                           primary_key=None, index=None, foreign_key=None,
@@ -969,3 +1000,6 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                 if not exclude or name not in exclude:
                     result.append(name)
         return result
+
+    def _index_condition_sql(self, condition):        
+        return ''

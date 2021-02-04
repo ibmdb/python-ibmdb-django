@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2020.                                      |
+# | (C) Copyright IBM Corporation 2009-2021.                                      |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -72,7 +72,7 @@ class DatabaseCreation ( BaseDatabaseCreation ):
         'URLField':                     'VARCHAR2(%(max_length)s)',
         'XMLField':                     'XML',
         'BinaryField':                  'BLOB',
-        
+        'SmallAutoField':               'SMALLINT',
     }
     
     if( djangoVersion[0:2] >= ( 1, 8 ) ):
@@ -93,6 +93,8 @@ class DatabaseCreation ( BaseDatabaseCreation ):
             'NullBooleanField':             'BOOLEAN',
             'PositiveIntegerField':         'INTEGER',
             'PositiveSmallIntegerField':    'SMALLINT',
+            'PositiveBigIntegerField':      'BIGINT',
+            'JSONField':                    'NCLOB',
         })
     
     data_type_check_constraints = {
@@ -100,6 +102,7 @@ class DatabaseCreation ( BaseDatabaseCreation ):
         'NullBooleanField': '(%(attname)s IN (0,1)) OR (%(attname)s IS NULL)',
         'PositiveIntegerField': '%(attname)s >= 0',
         'PositiveSmallIntegerField': '%(attname)s >= 0',
+        'PositiveBigIntegerField': '%(attname)s >= 0',        
     }
     
     def sql_indexes_for_field( self, model, f, style ):
@@ -167,8 +170,7 @@ class DatabaseCreation ( BaseDatabaseCreation ):
             kwargsKeys = list(kwargs.keys())
             if ( kwargsKeys.__contains__( 'port' ) and 
                     kwargsKeys.__contains__( 'host' ) ):
-                    kwargs['dsn'] = "DATABASE=%s;HOSTNAME=%s;PORT=%s;PROTOCOL=TCPIP;" % ( 
-                             kwargs.get( 'dbname' ),
+                    kwargs['dsn'] = "attach=true;HOSTNAME=%s;PORT=%s;PROTOCOL=TCPIP;" % (                              
                              kwargs.get( 'host' ),
                              kwargs.get( 'port' )
                     )

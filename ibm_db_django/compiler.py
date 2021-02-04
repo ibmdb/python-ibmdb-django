@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2020.                                      |
+# | (C) Copyright IBM Corporation 2009-2021.                                      |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -30,9 +30,10 @@ from django import VERSION as djangoVersion
 import datetime
 from django.db.models.sql.query import get_order_dir
 from django.db.models.sql.constants import ORDER_DIR
-from django.db.models.expressions import OrderBy, Random, RawSQL, Ref
+from django.db.models.expressions import OrderBy, Random, RawSQL, Ref, Value, F
 from django.utils.hashable import make_hashable
 from django.db.utils import DatabaseError
+from django.db.models.functions import Cast
 FORCE = object()
 
 class SQLCompiler( compiler.SQLCompiler ):
@@ -78,9 +79,13 @@ class SQLCompiler( compiler.SQLCompiler ):
         order_by = []
         for field in ordering:
             if hasattr(field, 'resolve_expression'):
+                if isinstance(field, Value):
+                    # output_field must be resolved for constants.
+                    field = Cast(field, field.output_field)
                 if not isinstance(field, OrderBy):
                     field = field.asc()
                 if not self.query.standard_ordering:
+                    field = field.copy()
                     field.reverse_ordering()
                     order_by.append((field, True))
                 else:
@@ -100,11 +105,14 @@ class SQLCompiler( compiler.SQLCompiler ):
                     True))
                 continue
             if col in self.query.annotations:
-                # References to an expression which is masked out of the SELECT clause
-                order_by.append((
-                    OrderBy(self.query.annotations[col], descending=descending),
-                    False))
-                continue
+                # References to an expression which is masked out of the SELECT
+                # clause.
+                expr = self.query.annotations[col]
+                if isinstance(expr, Value):
+                    # output_field must be resolved for constants.
+                    expr = Cast(expr, expr.output_field)
+                order_by.append((OrderBy(expr, descending=descending), False))
+                continue            
 
             if '.' in field:
                 # This came in through an extra(order_by=...) addition. Pass it
@@ -117,7 +125,7 @@ class SQLCompiler( compiler.SQLCompiler ):
                     ), False))
                 continue
 
-            if not self.query._extra or col not in self.query._extra:
+            if not self.query.extra or col not in self.query.extra:
                 # 'col' is of the form 'field' or 'field1__field2' or
                 # '-field1__field2__field', etc.
                 order_by.extend(self.find_ordering_name(
@@ -138,25 +146,33 @@ class SQLCompiler( compiler.SQLCompiler ):
             resolved = expr.resolve_expression(self.query, allow_joins=True, reuse=None)
             if self.query.combinator:
                 src = resolved.get_source_expressions()[0]
+                expr_src = expr.get_source_expressions()[0]
                 # Relabel order by columns to raw numbers if this is a combined
                 # query; necessary since the columns can't be referenced by the
                 # fully qualified name and the simple column names may collide.
                 for idx, (sel_expr, _, col_alias) in enumerate(self.select):
                     if is_ref and col_alias == src.refs:
                         src = src.source
-                    elif col_alias:
+                    elif col_alias and not (
+                        isinstance(expr_src, F) and col_alias == expr_src.name
+                    ):
                         continue
                     if src == sel_expr:
                         resolved.set_source_expressions([RawSQL('%d' % (idx + 1), ())])
                         break
                 else:
-                    raise DatabaseError('ORDER BY term does not match any column in the result set.')
-            sql, params = self.compile_order_by(resolved)
+                    if col_alias:
+                        raise DatabaseError('ORDER BY term does not match any column in the result set.')
+                    # Add column used in ORDER BY clause without an alias to
+                    # the selected columns.
+                    self.query.add_select_col(src)
+                    resolved.set_source_expressions([RawSQL('%d' % len(self.query.select), ())])
+            sql, params = self.compile(resolved)            
             # Don't add the same column twice, but the order direction is
             # not taken into account so we strip it. When this entire method
             # is refactored into expressions, then we can check each part as we
             # generate it.
-            without_ordering = self.ordering_parts.search(sql).group(1)
+            without_ordering = self.ordering_parts.search(sql)[1]
             params_hash = make_hashable(params)
             if (without_ordering, params_hash) in seen:
                 continue

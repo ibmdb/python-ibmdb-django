@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2020.                                      |
+# | (C) Copyright IBM Corporation 2009-2021.                                      |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -87,7 +87,11 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
         if data_type == Database.NUMBER and not _IS_JYTHON:
             if description.precision == 5:
                 return 'SmallIntegerField'
-
+        
+        if data_type == Database.TEXT and not _IS_JYTHON:
+            if description.precision == 4194304:
+                return 'JSONField'
+            
         return super(DatabaseIntrospection, self).get_field_type(data_type, description)
     
     # Converting table name to lower case.
@@ -243,12 +247,6 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
         description = []
         table_type = 'T'
 
-        sql = "SELECT count(1) FROM SYSIBM.SYSTABLES WHERE NAME = '%s' AND TYPE = '%s'" % (table_name.upper(), table_type)
-        cursor.execute(sql)
-        table_exist = cursor.fetchone()[0]
-        if table_exist == 0:
-            return description
-
         if not _IS_JYTHON:
             dbms_name='dbms_name'
             schema = cursor.connection.get_current_schema()
@@ -260,7 +258,9 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
             else:
                 sql = "SELECT TYPE FROM SYSIBM.SYSTABLES WHERE CREATOR='%(schema)s' AND NAME='%(table)s'" % {'schema': schema.upper(), 'table': table_name.upper()}
             cursor.execute(sql)
-            table_type = cursor.fetchone()[0]
+            table_type = cursor.fetchone()
+            if table_type != None:
+                table_type = table_type[0]
 
         if table_type != 'X':
             cursor.execute( "SELECT * FROM %s FETCH FIRST 1 ROWS ONLY" % qn( table_name ) )
@@ -279,17 +279,18 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
         return description
 
     def get_constraints(self, cursor, table_name):
-        constraints = {} 
+        constraints = {}
         if not _IS_JYTHON:
-            schema = cursor.connection.get_current_schema()
+            schema = cursor.connection.get_current_schema().upper()   
+            table_name = table_name.upper()         
             dbms_name='dbms_name'
 
             if (getattr(cursor.connection, dbms_name) == 'AS'):
-                sql = "SELECT CONSTRAINT_NAME, COLUMN_NAME FROM QSYS2.SYSCSTCOL WHERE TABLE_SCHEMA='%(schema)s' AND TABLE_NAME='%(table)s'" % {'schema': schema.upper(), 'table': table_name.upper()}
+                sql = "SELECT CONSTRAINT_NAME, COLUMN_NAME FROM QSYS2.SYSCSTCOL WHERE TABLE_SCHEMA='%(schema)s' AND TABLE_NAME='%(table)s'" % {'schema': schema, 'table': table_name}
             elif ( getattr(cursor.connection, dbms_name) != 'DB2'):
-                sql = "SELECT CONSTNAME, COLNAME FROM SYSCAT.COLCHECKS WHERE TABSCHEMA='%(schema)s' AND TABNAME='%(table)s'" % {'schema': schema.upper(), 'table': table_name.upper()}
+                sql = "SELECT CONSTNAME, COLNAME FROM SYSCAT.COLCHECKS WHERE TABSCHEMA='%(schema)s' AND TABNAME='%(table)s'" % {'schema': schema, 'table': table_name}
             else:
-                sql = "SELECT CHECKNAME, COLNAME FROM SYSIBM.SYSCHECKDEP WHERE TBOWNER='%(schema)s' AND TBNAME='%(table)s'" % {'schema': schema.upper(), 'table': table_name.upper()}
+                sql = "SELECT CHECKNAME, COLNAME FROM SYSIBM.SYSCHECKDEP WHERE TBOWNER='%(schema)s' AND TBNAME='%(table)s'" % {'schema': schema, 'table': table_name}
             cursor.execute(sql)
             for constname, colname in cursor.fetchall():
                 constname = constname.lower()
@@ -305,11 +306,11 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                 constraints[constname]['columns'].append(colname.lower())
                 
             if getattr(cursor.connection, dbms_name) == 'AS':
-                sql = "SELECT KEYCOL.CONSTRAINT_NAME, KEYCOL.COLUMN_NAME FROM QSYS2.SYSKEYCST KEYCOL INNER JOIN QSYS2.SYSCST TABCONST ON KEYCOL.CONSTRAINT_NAME=TABCONST.CONSTRAINT_NAME WHERE TABCONST.TABLE_SCHEMA='%(schema)s' and TABCONST.TABLE_NAME='%(table)s' and TABCONST.TYPE='U'" % {'schema': schema.upper(), 'table': table_name.upper()}
+                sql = "SELECT KEYCOL.CONSTRAINT_NAME, KEYCOL.COLUMN_NAME FROM QSYS2.SYSKEYCST KEYCOL INNER JOIN QSYS2.SYSCST TABCONST ON KEYCOL.CONSTRAINT_NAME=TABCONST.CONSTRAINT_NAME WHERE TABCONST.TABLE_SCHEMA='%(schema)s' and TABCONST.TABLE_NAME='%(table)s' and TABCONST.TYPE='U'" % {'schema': schema, 'table': table_name}
             elif ( getattr(cursor.connection, dbms_name) != 'DB2'):
-               sql = "SELECT KEYCOL.CONSTNAME, KEYCOL.COLNAME FROM SYSCAT.KEYCOLUSE KEYCOL INNER JOIN SYSCAT.TABCONST TABCONST ON KEYCOL.CONSTNAME=TABCONST.CONSTNAME WHERE TABCONST.TABSCHEMA='%(schema)s' and TABCONST.TABNAME='%(table)s' and TABCONST.TYPE='U'" % {'schema': schema.upper(), 'table': table_name.upper()}
+                sql = "SELECT KEYCOL.CONSTNAME, KEYCOL.COLNAME FROM SYSCAT.KEYCOLUSE KEYCOL INNER JOIN SYSCAT.TABCONST TABCONST ON KEYCOL.CONSTNAME=TABCONST.CONSTNAME WHERE TABCONST.TABSCHEMA='%(schema)s' and TABCONST.TABNAME='%(table)s' and TABCONST.TYPE='U'" % {'schema': schema, 'table': table_name}
             else:
-                sql = "SELECT KEYCOL.CONSTNAME, KEYCOL.COLNAME FROM SYSIBM.SYSKEYCOLUSE KEYCOL INNER JOIN SYSIBM.SYSTABCONST TABCONST ON KEYCOL.CONSTNAME=TABCONST.CONSTNAME WHERE TABCONST.TBCREATOR='%(schema)s' AND TABCONST.TBNAME='%(table)s' AND TABCONST.TYPE='U'" % {'schema': schema.upper(), 'table': table_name.upper()}
+                sql = "SELECT KEYCOL.CONSTNAME, KEYCOL.COLNAME FROM SYSIBM.SYSKEYCOLUSE KEYCOL INNER JOIN SYSIBM.SYSTABCONST TABCONST ON KEYCOL.CONSTNAME=TABCONST.CONSTNAME WHERE TABCONST.TBCREATOR='%(schema)s' AND TABCONST.TBNAME='%(table)s' AND TABCONST.TYPE='U'" % {'schema': schema, 'table': table_name}
             cursor.execute(sql)
             for constname, colname in cursor.fetchall():
                 constname = constname.lower()
@@ -324,7 +325,8 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                     }
                 constraints[constname]['columns'].append(colname.lower())
             
-            for pkey in cursor.connection.primary_keys(None, schema, table_name):
+            table_t = table_name.replace('""', '\"') if table_name.count("\"") > 0 else table_name
+            for pkey in cursor.connection.primary_keys(None, schema, table_t):
                 pkey['PK_NAME'] = pkey['PK_NAME'].lower()
                 if pkey['PK_NAME'] not in constraints:
                     constraints[pkey['PK_NAME']] = {
@@ -337,7 +339,7 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                     }
                 constraints[pkey['PK_NAME']]['columns'].append(pkey['COLUMN_NAME'].lower())    
             
-            for fk in cursor.connection.foreign_keys( True, schema, table_name ):
+            for fk in cursor.connection.foreign_keys( True, schema, table_t ):
                 fk['FK_NAME'] = fk['FK_NAME'].lower()
                 if fk['FK_NAME'] not in constraints:
                     constraints[fk['FK_NAME']] = {
@@ -354,7 +356,7 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                     fkeylist.append(fk['PKCOLUMN_NAME'].lower())
                     constraints[fk['FK_NAME']]['foreign_key'] = tuple(fkeylist)
 
-            sql = "SELECT INDNAME, COLNAMES, UNIQUERULE, INDEXTYPE from SYSCAT.INDEXES where TABNAME = '%s'" % table_name.upper()
+            sql = "SELECT INDNAME, COLNAMES, UNIQUERULE, INDEXTYPE from SYSCAT.INDEXES where TABNAME = '%s'" % table_name
             cursor.execute(sql)
             for INDEX_NAME, COLUMN_NAME, UNIQUE_RULE, INDEX_TYPE in cursor.fetchall():
                 INDEX_NAME = INDEX_NAME.lower()

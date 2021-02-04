@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2020.                                      |
+# | (C) Copyright IBM Corporation 2009-2021.                                      |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -191,6 +191,8 @@ class DatabaseOperations ( BaseDatabaseOperations ):
             return 'BITOR(%s, %s)' % ( sub_expressions[0], sub_expressions[1] )
         elif operator == '^':
             return 'POWER(%s, %s)' % ( sub_expressions[0], sub_expressions[1] )
+        elif operator == '#':
+            return 'BITXOR(%s, %s)' % ( sub_expressions[0], sub_expressions[1] )
         elif operator == '-':
             if( djangoVersion[0:2] >= ( 2 , 0) ):
                 strr= str(sub_expressions[1])
@@ -217,6 +219,8 @@ class DatabaseOperations ( BaseDatabaseOperations ):
             return " TO_CHAR(%s, 'IYYY')" % field_name
         elif lookup_type.upper() == 'WEEK':
             return " WEEK_ISO(%s) " % field_name
+        elif lookup_type.upper() == 'ISO_WEEK_DAY':            
+            return "DAYOFWEEK_ISO(%s)" % field_name
         else:
             return " %s(%s) " % ( lookup_type.upper(), field_name )
     
@@ -372,13 +376,17 @@ class DatabaseOperations ( BaseDatabaseOperations ):
     # Function to quote the name of schema, table and column.
     def quote_name( self, name = None):
         name = name.upper()
+        
+        if( name.startswith( '""' ) & name.endswith( '""' ) ):
+            return "\"%s\"" % name
+        
         if( name.startswith( "\"" ) & name.endswith( "\"" ) ):
             return name
         
         if( name.startswith( "\"" ) ):
             return "%s\"" % name
         
-        if( name.endswith( "\"" ) ):
+        if( name.endswith( "\"" ) ) & ( name.count("\"") % 2 == 1 ):
             return "\"%s" % name
 
         return "\"%s\"" % name
@@ -409,7 +417,7 @@ class DatabaseOperations ( BaseDatabaseOperations ):
     
     # Deleting all the rows from the list of tables provided and resetting all the
     # sequences.
-    def sql_flush( self, style, tables, sequences, allow_cascade=False ):
+    def sql_flush( self, style, tables, reset_sequences=False, allow_cascade=False ):
         curr_schema = self.connection.connection.get_current_schema().upper()
         sqls = []
         if tables:
@@ -491,6 +499,7 @@ class DatabaseOperations ( BaseDatabaseOperations ):
                 sqls.append( "CALL FKEY_ALT_CONST( '' , '%s' );" % ( curr_schema, ) )
                 sqls.append( "DROP PROCEDURE FKEY_ALT_CONST;" )  
                 
+            sequences = self.connection.introspection.sequence_list() if reset_sequences else ()
             for sequence in sequences:
                 if( sequence['column'] != None ):
                     sqls.append( style.SQL_KEYWORD( "ALTER TABLE" ) + " " + 
@@ -636,3 +645,16 @@ class DatabaseOperations ( BaseDatabaseOperations ):
             raise ValueError( "distinct_on_fields not supported" )
         else:
             return ['DISTINCT'], []
+
+    def last_executed_query(self, cursor, sql, params):
+        if params:
+            if isinstance(params, list):
+                params = tuple(params)
+            
+            if sql.count("db2regexExtraField(%s)") > 0:
+                sql = sql.replace("db2regexExtraField(%s)", "")
+                
+            return sql % params
+        else:
+            return sql
+
