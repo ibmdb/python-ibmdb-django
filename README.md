@@ -11,7 +11,7 @@ The adapter has been developed and is supported by IBM
 
  * Install Python 2.7 or Python 3 <= 3.8. 
    The minimum python version supported by driver is python 2.7 and the latest version supported is python 3.8 except version 3.3 as it has reached end-of-life.
- * Django Framework 2.2.0
+ * Django Framework 2.2.0 or 3.1
  * IBM_DB driver and IBM_DB_DBI wrapper 1.0 or higher
    ``` 
     Install ibm_db driver with below commands:
@@ -35,7 +35,11 @@ Install Django as per instructions from the Django [http://docs.djangoproject.co
 ## 2. Install DB2 Django adapter (ibm_db_django)  
 
 ```  
-$ pip install ibm_db_django==1.3.0.0  
+For Django 2.2,
+	$ pip install ibm_db_django==1.3.0.0  
+	(or)
+For Django 3.1,
+	$ pip install ibm_db_django==1.4.0.0  
 ```
  
 # Tested Operating Systems 
