@@ -12,6 +12,7 @@ The adapter has been developed and is supported by IBM
  * Install Python 2.7 or Python 3 <= 3.8. 
    The minimum python version supported by driver is python 2.7 and the latest version supported is python 3.8 except version 3.3 as it has reached end-of-life.
  * Django Framework 2.2.0 or 3.1
+ * regex package version >= 2020.7.14 
  * IBM_DB driver and IBM_DB_DBI wrapper 1.0 or higher
    ``` 
     Install ibm_db driver with below commands:
