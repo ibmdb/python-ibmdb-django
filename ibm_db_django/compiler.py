@@ -18,6 +18,7 @@
 
 from django.db.models.sql import compiler
 import sys
+from django.db.models.functions.comparison import JSONObject
 
 if sys.version_info >= (3, ):
     try:
@@ -30,25 +31,58 @@ from django import VERSION as djangoVersion
 import datetime
 from django.db.models.sql.query import get_order_dir
 from django.db.models.sql.constants import ORDER_DIR
-from django.db.models.expressions import OrderBy, Random, RawSQL, Ref, Value, F
+from django.db.models.expressions import OrderBy, RawSQL, Ref, Value, F, Func
 from django.utils.hashable import make_hashable
 from django.db.utils import DatabaseError
-from django.db.models.functions import Cast
+from django.db.models.functions import Cast, Random
 FORCE = object()
+
+class FuncDB2(Func):
+    def __init__(self, *expressions, output_field=None, **extra):        
+        super().__init__(output_field=output_field)        
+    
+    def as_sql(self, compiler, connection, function=None, template=None, arg_joiner=None, **extra_context):
+        connection.ops.check_expression_support(self)
+        sql_parts = []
+        params = []
+        for arg in self.source_expressions:
+            arg_sql, arg_params = compiler.compile(arg)
+            sql_parts.append(arg_sql)
+            params.extend(arg_params)
+        data = {**self.extra, **extra_context}
+        # Use the first supplied value in this order: the parameter to this
+        # method, a value supplied in __init__()'s **extra (the value in
+        # `data`), or the value defined on the class.
+        if function is not None:
+            data['function'] = function
+        else:
+            data.setdefault('function', self.function)
+        template = template or data.get('template', self.template)
+        arg_joiner = arg_joiner or data.get('arg_joiner', self.arg_joiner)
+        arg_sql = ""
+        for i in range(0, len(sql_parts), 2):
+            if i > 0:
+                arg_sql += ','
+            arg_sql += " KEY '%s' VALUE %s " % (sql_parts[i], sql_parts[i+1])
+        data['expressions'] = data['field'] = arg_sql
+        sql = template % data
+        return sql % tuple(params), []
 
 class SQLCompiler( compiler.SQLCompiler ):
     __rownum = 'Z.__ROWNUM'
 
-    def compile_order_by(self, node, select_format=False):
-        template = None
-        if node.nulls_last:
-            template = '%(expression)s IS NULL, %(expression)s %(ordering)s'
-        elif node.nulls_first:
-            template = '%(expression)s IS NOT NULL, %(expression)s %(ordering)s'
-
-        sql, params = node.as_sql(self, self.connection, template=template)
-        if select_format is FORCE or (select_format and not self.query.subquery):
-            return node.output_field.select_format(self, sql, params)
+    def compile(self, node):
+        vendor_impl = getattr(node, 'as_' + self.connection.vendor, None)
+        if vendor_impl:
+            sql, params = vendor_impl(self, self.connection)
+        else:             
+            if isinstance(node, JSONObject):
+                funcDb2 = FuncDB2()
+                funcDb2.function = node.function
+                funcDb2.source_expressions = node.source_expressions 
+                sql, params = funcDb2.as_sql(self, self.connection )            
+            else:
+                sql, params = node.as_sql(self, self.connection)
         return sql, params
 
     def get_order_by(self):
@@ -107,10 +141,15 @@ class SQLCompiler( compiler.SQLCompiler ):
             if col in self.query.annotations:
                 # References to an expression which is masked out of the SELECT
                 # clause.
-                expr = self.query.annotations[col]
-                if isinstance(expr, Value):
-                    # output_field must be resolved for constants.
-                    expr = Cast(expr, expr.output_field)
+                if self.query.combinator and self.select:
+                    # Don't use the resolved annotation because other
+                    # combinated queries might define it differently.
+                    expr = F(col)
+                else:
+                    expr = self.query.annotations[col]
+                    if isinstance(expr, Value):
+                        # output_field must be resolved for constants.
+                        expr = Cast(expr, expr.output_field)
                 order_by.append((OrderBy(expr, descending=descending), False))
                 continue            
 
@@ -126,10 +165,15 @@ class SQLCompiler( compiler.SQLCompiler ):
                 continue
 
             if not self.query.extra or col not in self.query.extra:
-                # 'col' is of the form 'field' or 'field1__field2' or
-                # '-field1__field2__field', etc.
-                order_by.extend(self.find_ordering_name(
-                    field, self.query.get_meta(), default_order=asc))
+                if self.query.combinator and self.select:
+                    # Don't use the first model's field because other
+                    # combinated queries might define it differently.
+                    order_by.append((OrderBy(F(col), descending=descending), False))
+                else:
+                    # 'col' is of the form 'field' or 'field1__field2' or
+                    # '-field1__field2__field', etc.
+                    order_by.extend(self.find_ordering_name(
+                        field, self.query.get_meta(), default_order=asc))
             else:
                 if col not in self.query.extra_select:
                     order_by.append((
@@ -144,7 +188,7 @@ class SQLCompiler( compiler.SQLCompiler ):
 
         for expr, is_ref in order_by:
             resolved = expr.resolve_expression(self.query, allow_joins=True, reuse=None)
-            if self.query.combinator:
+            if self.query.combinator and self.select:
                 src = resolved.get_source_expressions()[0]
                 expr_src = expr.get_source_expressions()[0]
                 # Relabel order by columns to raw numbers if this is a combined
@@ -165,8 +209,15 @@ class SQLCompiler( compiler.SQLCompiler ):
                         raise DatabaseError('ORDER BY term does not match any column in the result set.')
                     # Add column used in ORDER BY clause without an alias to
                     # the selected columns.
-                    self.query.add_select_col(src)
-                    resolved.set_source_expressions([RawSQL('%d' % len(self.query.select), ())])
+                    order_by_idx = len(self.query.select) + 1
+                    col_name = f'__orderbycol{order_by_idx}'
+                    for q in self.query.combined_queries:
+                        q.add_annotation(expr_src, col_name)
+                    self.query.add_select_col(src, col_name)
+                    resolved.set_source_expressions([RawSQL(f'{order_by_idx}', ())])
+                    
+                    #self.query.add_select_col(src)
+                    #resolved.set_source_expressions([RawSQL('%d' % len(self.query.select), ())])
             sql, params = self.compile(resolved)            
             # Don't add the same column twice, but the order direction is
             # not taken into account so we strip it. When this entire method
