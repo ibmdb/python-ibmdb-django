@@ -19,6 +19,7 @@ from collections import namedtuple
 import sys
 _IS_JYTHON = sys.platform.startswith( 'java' )
 
+import regex
 if not _IS_JYTHON:
     try:    
         # Import IBM_DB wrapper ibm_db_dbi
@@ -274,10 +275,35 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                     desc[5], #scale
                     desc[6], #null_ok
                     None,    #default
+                    None,    #collation
                     ) for desc in cursor.description ]
 
         return description
 
+    def _get_foreign_key_constraints(self, cursor, table_name):
+        constraints = {}      
+        
+        table_t = table_name.replace('""', '\"') if table_name.count("\"") > 0 else table_name
+        schema = cursor.connection.get_current_schema().upper()
+        for fk in cursor.connection.foreign_keys( True, schema, table_t ):
+            fk['FK_NAME'] = fk['FK_NAME'].lower()
+            if fk['FK_NAME'] not in constraints:
+                constraints[fk['FK_NAME']] = {
+                    'columns': [],
+                    'primary_key': False,
+                    'unique': False,
+                    'foreign_key': (fk['PKTABLE_NAME'].lower(), fk['PKCOLUMN_NAME'].lower()),
+                    'check': False,
+                    'index': False
+                }
+            constraints[fk['FK_NAME']]['columns'].append(fk['FKCOLUMN_NAME'].lower())
+            if fk['PKCOLUMN_NAME'].lower() not in constraints[fk['FK_NAME']]['foreign_key']:
+                fkeylist = list(constraints[fk['FK_NAME']]['foreign_key'])
+                fkeylist.append(fk['PKCOLUMN_NAME'].lower())
+                constraints[fk['FK_NAME']]['foreign_key'] = tuple(fkeylist)
+                
+        return constraints
+    
     def get_constraints(self, cursor, table_name):
         constraints = {}
         if not _IS_JYTHON:
@@ -356,11 +382,17 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                     fkeylist.append(fk['PKCOLUMN_NAME'].lower())
                     constraints[fk['FK_NAME']]['foreign_key'] = tuple(fkeylist)
 
-            sql = "SELECT INDNAME, COLNAMES, UNIQUERULE, INDEXTYPE from SYSCAT.INDEXES where TABNAME = '%s'" % table_name
-            cursor.execute(sql)
-            for INDEX_NAME, COLUMN_NAME, UNIQUE_RULE, INDEX_TYPE in cursor.fetchall():
+            sql = "SELECT ind.INDNAME as INDNAME, ind.COLNAMES as COLNAMES, ind.UNIQUERULE as UNIQUERULE, ind.INDEXTYPE as INDEXTYPE, cols.COLORDER as COLORDER from SYSCAT.INDEXES ind  JOIN syscat.indexcoluse cols on ind.indname = cols.indname and ind.indschema = cols.indschema where ind.TABNAME = '%s'" % table_name
+            cursor.execute(sql)            
+            for INDEX_NAME, COLUMN_NAME, UNIQUE_RULE, INDEX_TYPE, COL_ORDER in cursor.fetchall():
                 INDEX_NAME = INDEX_NAME.lower()
                 COLUMN_NAME = COLUMN_NAME.lower()
+                if COL_ORDER == 'D':
+                    COLORDER = 'DESC'
+                elif COL_ORDER == 'A':
+                    COLORDER = 'ASC'
+                else:
+                    COLORDER = 'IGN'  #IGN=Ignored
                 if INDEX_NAME not in constraints:
                     constraints[INDEX_NAME] = {
                         'columns': [],
@@ -369,17 +401,18 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                         'foreign_key': None,
                         'check': False,
                         'index': True,
-                        'type': 'idx' if INDEX_TYPE == 'REG ' else INDEX_TYPE
+                        'type': 'idx' if INDEX_TYPE == 'REG ' else INDEX_TYPE,
+                        'orders': []                        
                     }
                 elif constraints[INDEX_NAME]['unique'] :
                     continue
                 elif constraints[INDEX_NAME]['primary_key']:
                     continue
-                if COLUMN_NAME.startswith('+'):
-                    COLUMN_NAME = COLUMN_NAME.split('+')
+                if COLUMN_NAME.startswith(('+', '-')):
+                    COLUMN_NAME = regex.split('[+-]+', COLUMN_NAME)
                     COLUMN_NAME.pop(0)
                 constraints[INDEX_NAME]['columns'] = COLUMN_NAME
-                constraints[INDEX_NAME]['orders'] = ['ASC'] * len(COLUMN_NAME)
+                constraints[INDEX_NAME]['orders'].append(COLORDER)
 
             return constraints
 

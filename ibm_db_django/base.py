@@ -24,7 +24,7 @@ import sys
 _IS_JYTHON = sys.platform.startswith( 'java' )
 
 from django.core.exceptions import ImproperlyConfigured
-
+from django.utils.functional import cached_property
 # Importing class from base module of django.db.backends
 
 try:
@@ -142,8 +142,23 @@ class DatabaseFeatures( BaseDatabaseFeatures ):
     # Can it create foreign key constraints inline when adding columns?
     #In DB2, creating FK inline when adding columns is allowed, but we disable it purposefully 
     #as at many situations deferring adding constraints is needed. 
-    can_create_inline_fk = False
-    
+    can_create_inline_fk = False    
+    supports_json_field_contains = False
+       
+    @cached_property
+    def introspected_field_types(self):
+        return {
+            **super().introspected_field_types,
+            'AutoField': 'IntegerField',
+            'BigAutoField': 'BigIntegerField',      
+            'SmallAutoField': 'SmallIntegerField',
+            'DurationField': 'BigIntegerField',
+            'GenericIPAddressField': 'CharField',
+            'PositiveBigIntegerField': 'BigIntegerField',
+            'PositiveIntegerField': 'IntegerField',
+            'PositiveSmallIntegerField': 'SmallIntegerField',            
+        }
+        
 class DatabaseValidation( BaseDatabaseValidation ):    
     #Need to do validation for DB2 and ibm_db version
     def validate_field( self, errors, opts, f ):

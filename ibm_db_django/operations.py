@@ -257,7 +257,9 @@ class DatabaseOperations ( BaseDatabaseOperations ):
     # Truncating the date value on the basic of lookup type.
     # e.g If input is 2008-12-04 and month then output will be 2008-12-01 00:00:00
     # Reference: http://www.ibm.com/developerworks/data/library/samples/db2/0205udfs/index.html
-    def date_trunc_sql( self, lookup_type, field_name ):
+    def date_trunc_sql( self, lookup_type, field_name, tzname=None ):
+        #As DB2 LUW doesn't support timezone, we comment below line for now. 
+        #field_name = self._convert_field_to_tz(field_name, tzname)
         return "DATE_TRUNC('%s', %s)" % (lookup_type, field_name)
     
     # Truncating the time zone-aware timestamps value on the basic of lookup type
@@ -270,7 +272,7 @@ class DatabaseOperations ( BaseDatabaseOperations ):
                 field_name = "%s + %s HOURS + %s MINUTES" % (field_name, hr, min)
         return self.date_trunc_sql(lookup_type, field_name)
 
-    def time_trunc_sql(self, lookup_type, field_name):
+    def time_trunc_sql(self, lookup_type, field_name, tzname=None):
         return "DATE_TRUNC('%s', %s)::time" % (lookup_type, field_name)
 
     def datetime_cast_date_sql(self, field_name, tzname):
@@ -630,7 +632,7 @@ class DatabaseOperations ( BaseDatabaseOperations ):
         values_sql = ", ".join("(%s)" % sql for sql in placeholder_rows_sql)
         return "VALUES " + values_sql
     
-    def for_update_sql(self, nowait=False, skip_locked=False, of=()):
+    def for_update_sql(self, nowait=False, skip_locked=False, of=(), no_key=False):
         #DB2 doesn't support nowait select for update
         if nowait:
             if ( djangoVersion[0:2] > ( 1, 1 ) ):
@@ -658,3 +660,9 @@ class DatabaseOperations ( BaseDatabaseOperations ):
         else:
             return sql
 
+    def limit_offset_sql(self, low_mark, high_mark):
+        fetch, offset = self._get_limit_offset_params(low_mark, high_mark)
+        return ' '.join(sql for sql in (
+            ('OFFSET %d ROWS' % offset) if offset else None,
+            ('FETCH FIRST %d ROWS ONLY' % fetch) if fetch else None,
+        ) if sql)

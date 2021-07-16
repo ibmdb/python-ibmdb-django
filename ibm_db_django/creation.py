@@ -98,11 +98,11 @@ class DatabaseCreation ( BaseDatabaseCreation ):
         })
     
     data_type_check_constraints = {
-        'BooleanField': '%(attname)s IN (0,1)',
-        'NullBooleanField': '(%(attname)s IN (0,1)) OR (%(attname)s IS NULL)',
-        'PositiveIntegerField': '%(attname)s >= 0',
-        'PositiveSmallIntegerField': '%(attname)s >= 0',
-        'PositiveBigIntegerField': '%(attname)s >= 0',        
+        'BooleanField': '%(column)s IN (0,1)',
+        'NullBooleanField': '(%(column)s IN (0,1)) OR (%(column)s IS NULL)',
+        'PositiveIntegerField': '%(column)s >= 0',
+        'PositiveSmallIntegerField': '%(column)s >= 0',
+        'PositiveBigIntegerField': '%(column)s >= 0',        
     }
     
     def sql_indexes_for_field( self, model, f, style ):
