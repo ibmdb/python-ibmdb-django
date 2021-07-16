@@ -432,7 +432,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         if old_field.column != new_field.column:
             #Need to change the field name
             
-            # Drop incoming FK constraints for no primary key fields 
+            # Drop incoming FK constraints for non-primary key fields 
             fk_constraints = self._is_referenced_by_fk_constraint(model._meta.db_table, old_field.column, ignore_self=True)
             for table, contraints in fk_constraints.items():
                 for constr_name in contraints.keys():

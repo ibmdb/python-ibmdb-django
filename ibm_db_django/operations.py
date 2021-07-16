@@ -258,7 +258,7 @@ class DatabaseOperations ( BaseDatabaseOperations ):
     # e.g If input is 2008-12-04 and month then output will be 2008-12-01 00:00:00
     # Reference: http://www.ibm.com/developerworks/data/library/samples/db2/0205udfs/index.html
     def date_trunc_sql( self, lookup_type, field_name, tzname=None ):
-        #As DB2 LUW doesn't support timezone, we comment we below line for now. 
+        #As DB2 LUW doesn't support timezone, we comment below line for now. 
         #field_name = self._convert_field_to_tz(field_name, tzname)
         return "DATE_TRUNC('%s', %s)" % (lookup_type, field_name)
     

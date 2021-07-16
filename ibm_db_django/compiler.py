@@ -143,7 +143,7 @@ class SQLCompiler( compiler.SQLCompiler ):
                 # clause.
                 if self.query.combinator and self.select:
                     # Don't use the resolved annotation because other
-                    # combinated queries might define it differently.
+                    # combined queries might define it differently.
                     expr = F(col)
                 else:
                     expr = self.query.annotations[col]
@@ -167,7 +167,7 @@ class SQLCompiler( compiler.SQLCompiler ):
             if not self.query.extra or col not in self.query.extra:
                 if self.query.combinator and self.select:
                     # Don't use the first model's field because other
-                    # combinated queries might define it differently.
+                    # combined queries might define it differently.
                     order_by.append((OrderBy(F(col), descending=descending), False))
                 else:
                     # 'col' is of the form 'field' or 'field1__field2' or
@@ -216,8 +216,6 @@ class SQLCompiler( compiler.SQLCompiler ):
                     self.query.add_select_col(src, col_name)
                     resolved.set_source_expressions([RawSQL(f'{order_by_idx}', ())])
                     
-                    #self.query.add_select_col(src)
-                    #resolved.set_source_expressions([RawSQL('%d' % len(self.query.select), ())])
             sql, params = self.compile(resolved)            
             # Don't add the same column twice, but the order direction is
             # not taken into account so we strip it. When this entire method
