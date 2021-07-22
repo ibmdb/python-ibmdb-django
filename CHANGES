@@ -1,5 +1,9 @@
 Change Log
 =============
+2021/07/22
+-Added Support for Django3.2
+-Update version to 1.5.0.0 
+
 2021/02/05
 -Added Support for Django3.1
 -Update version to 1.4.0.0 
