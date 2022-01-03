@@ -43,7 +43,7 @@ For Django 3.1,
 	$ pip install ibm_db_django==1.4.0.0  
 	(or)
 For Django 3.2,
-	$ pip install ibm_db_django==1.5.0.0  
+	$ pip install ibm_db_django>=1.5.0.0  
 ```
  
 # Tested Operating Systems 
