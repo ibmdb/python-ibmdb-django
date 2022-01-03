@@ -126,7 +126,8 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                 # table[2] is table name
                 if( djangoVersion[0:2] < ( 1, 8 ) ):
                     table_list.append( table[2].lower() )
-            table_list.append(TableInfo(table[2].lower(),"t"))
+                else:
+                    table_list.append(TableInfo(table[2].lower(),"t"))
                 
         return table_list
     

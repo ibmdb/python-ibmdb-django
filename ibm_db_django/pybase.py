@@ -79,7 +79,7 @@ class DatabaseWrapper( object ):
             kwargs['dsn'] = kwargs.get( 'database' )
 
         if ( kwargsKeys.__contains__( 'currentschema' )):
-            kwargs['dsn'] += "CurrentSchema=%s;" % (  kwargs.get( 'currentschema' ))
+            kwargs['dsn'] += "CURRENTSCHEMA=%s;" % (  kwargs.get( 'currentschema' ))
             del kwargs['currentschema']
 
         if ( kwargsKeys.__contains__( 'security' )):
