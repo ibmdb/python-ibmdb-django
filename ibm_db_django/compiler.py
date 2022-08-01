@@ -258,7 +258,7 @@ class SQLCompiler( compiler.SQLCompiler ):
                 sql_ori = sql_ori + (' WITH RS USE AND KEEP UPDATE LOCKS')
             if sql_ori.count( "%%s" ) > 0:
                 sql_ori = sql_ori.replace("%%s", "%s")
-            if self.query.low_mark is 0:
+            if self.query.low_mark == 0:
                 return sql_ori + " FETCH FIRST %s ROWS ONLY" % ( self.query.high_mark ), params
             sql_split = sql_ori.split( " FROM " )
             
@@ -315,10 +315,10 @@ class SQLCompiler( compiler.SQLCompiler ):
                 sql = '%s, ( ROW_NUMBER() OVER() ) AS "%s" FROM ( %s ORDER BY %s ASC ) AS M' % ( sql_sel, self.__rownum, sql_pri, sql_field)
             sql = '%s FROM ( %s ) Z WHERE' % ( sql_sel, sql )
             
-            if self.query.low_mark is not 0:
+            if self.query.low_mark != 0:
                 sql = '%s "%s" > %d' % ( sql, self.__rownum, self.query.low_mark )
                 
-            if self.query.low_mark is not 0 and self.query.high_mark is not None:
+            if self.query.low_mark != 0 and self.query.high_mark is not None:
                 sql = '%s AND ' % ( sql )
 
             if self.query.high_mark is not None:
