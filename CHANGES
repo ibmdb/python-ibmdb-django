@@ -1,5 +1,9 @@
 Change Log
 =============
+2022/08/02
+-Added Support for Python3.10
+-Update version to 1.5.2.0
+
 2022/01/03
 -Added Support for Django3.2.*
 -Update version to 1.5.1.0
