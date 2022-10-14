@@ -77,13 +77,14 @@ For Django 3.2,
    {{{
    DATABASES = {
       'default': {
-         'ENGINE'     : 'ibm_db_django',
-         'NAME'       : 'mydb',
-         'USER'       : 'db2inst1',
-         'PASSWORD'   : 'ibmdb2',
-         'HOST'       : 'localhost',
-         'PORT'       : '50000',
-         'PCONNECT'   :  True,      #Optional property, default is false
+	 'ENGINE'       : 'ibm_db_django',
+         'NAME'         : 'mydb',
+         'USER'         : 'db2inst1',
+         'PASSWORD'     : 'ibmdb2',
+         'HOST'         : 'localhost',
+         'PORT'         : '50000',
+         'PCONNECT'     :  True,      #Optional property, default is false
+	 'CURRENTSCHEMA': 'MYSCHEMA'  #Required if the database schema is different than the instance owner (USER)
       }
    }
    }}}
