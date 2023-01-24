@@ -42,7 +42,7 @@ For Django 2.2,
 For Django 3.1,
 	$ pip install ibm_db_django==1.4.0.0  
 	(or)
-For Django 3.2,
+For Django 3.2, 4.0, 4.1, 4.2
 	$ pip install ibm_db_django>=1.5.0.0  
 ```
  
