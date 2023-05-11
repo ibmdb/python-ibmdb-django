@@ -25,14 +25,14 @@ PACKAGE = 'ibm_db_django'
 VERSION = __import__('ibm_db_django').__version__
 LICENSE = 'Apache License 2.0'
 extra = {}
-    
+
 setup (
     name              = PACKAGE,
     version           = VERSION,
     license           = LICENSE,
     platforms         = 'All',
     install_requires  = _IS_JYTHON and ['django==2.2'] or ['ibm_db>=3.0.1',
-                          'django>=3.2.*','six','regex'],
+                          'django>=3.2','six','regex'],
     dependency_links  = _IS_JYTHON and ['http://pypi.python.org/pypi/Django/'] or ['http://pypi.python.org/pypi/ibm_db/',
                           'http://pypi.python.org/pypi/Django/'],
     description       = 'DB2 support for Django framework.',
