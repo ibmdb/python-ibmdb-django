@@ -39,9 +39,9 @@ from django import VERSION as djangoVersion
 FORCE = object()
 
 class FuncDB2(Func):
-    def __init__(self, *expressions, output_field=None, **extra):        
-        super().__init__(output_field=output_field)        
-    
+    def __init__(self, *expressions, output_field=None, **extra):
+        super().__init__(output_field=output_field)
+
     def as_sql(self, compiler, connection, function=None, template=None, arg_joiner=None, **extra_context):
         connection.ops.check_expression_support(self)
         sql_parts = []
@@ -76,12 +76,12 @@ class SQLCompiler( compiler.SQLCompiler ):
         vendor_impl = getattr(node, 'as_' + self.connection.vendor, None)
         if vendor_impl:
             sql, params = vendor_impl(self, self.connection)
-        else:             
+        else:
             if isinstance(node, JSONObject):
                 funcDb2 = FuncDB2()
                 funcDb2.function = node.function
-                funcDb2.source_expressions = node.source_expressions 
-                sql, params = funcDb2.as_sql(self, self.connection )            
+                funcDb2.source_expressions = node.source_expressions
+                sql, params = funcDb2.as_sql(self, self.connection )
             else:
                 sql, params = node.as_sql(self, self.connection)
         return sql, params
@@ -152,7 +152,7 @@ class SQLCompiler( compiler.SQLCompiler ):
                         # output_field must be resolved for constants.
                         expr = Cast(expr, expr.output_field)
                 order_by.append((OrderBy(expr, descending=descending), False))
-                continue            
+                continue
 
             if '.' in field:
                 # This came in through an extra(order_by=...) addition. Pass it
@@ -216,8 +216,8 @@ class SQLCompiler( compiler.SQLCompiler ):
                         q.add_annotation(expr_src, col_name)
                     self.query.add_select_col(src, col_name)
                     resolved.set_source_expressions([RawSQL(f'{order_by_idx}', ())])
-                    
-            sql, params = self.compile(resolved)            
+
+            sql, params = self.compile(resolved)
             # Don't add the same column twice, but the order direction is
             # not taken into account so we strip it. When this entire method
             # is refactored into expressions, then we can check each part as we
@@ -262,17 +262,17 @@ class SQLCompiler( compiler.SQLCompiler ):
             if self.query.low_mark == 0:
                 return sql_ori + " FETCH FIRST %s ROWS ONLY" % ( self.query.high_mark ), params
             sql_split = sql_ori.split( " FROM " )
-            
+
             sql_sec = ""
             if len( sql_split ) > 2:
                 for i in range( 1, len( sql_split ) ):
                     sql_sec = " %s FROM %s " % ( sql_sec, sql_split[i] )
             else:
                 sql_sec = " FROM %s " % ( sql_split[1] )
-            
+
             dummyVal = "Z.__db2_"
             sql_pri = ""
-            
+
             sql_sel = "SELECT"
             if self.query.distinct:
                 sql_sel = "SELECT DISTINCT"
@@ -283,7 +283,7 @@ class SQLCompiler( compiler.SQLCompiler ):
             while ( i < len( sql_select_token ) ):
                 if sql_select_token[i].count( "TIMESTAMP(DATE(SUBSTR(CHAR(" ) == 1:
                     sql_sel = "%s \"%s%d\"," % ( sql_sel, dummyVal, i + 1 )
-                    sql_pri = '%s %s,%s,%s,%s AS "%s%d",' % ( 
+                    sql_pri = '%s %s,%s,%s,%s AS "%s%d",' % (
                                     sql_pri,
                                     sql_select_token[i],
                                     sql_select_token[i + 1],
@@ -292,14 +292,14 @@ class SQLCompiler( compiler.SQLCompiler ):
                                     dummyVal, i + 1 )
                     i = i + 4
                     continue
-                
+
                 if sql_select_token[i].count( " AS " ) == 1:
                     temp_col_alias = sql_select_token[i].split( " AS " )
                     sql_pri = '%s %s,' % ( sql_pri, sql_select_token[i] )
                     sql_sel = "%s %s," % ( sql_sel, temp_col_alias[1] )
                     i = i + 1
                     continue
-            
+
                 sql_pri = '%s %s AS "%s%d",' % ( sql_pri, sql_select_token[i], dummyVal, i + 1 )
                 sql_sel = "%s \"%s%d\"," % ( sql_sel, dummyVal, i + 1 )
                 i = i + 1
@@ -315,10 +315,10 @@ class SQLCompiler( compiler.SQLCompiler ):
                 sql_field = "\"%s%d\"" % (dummyVal, first_field_no)
                 sql = '%s, ( ROW_NUMBER() OVER() ) AS "%s" FROM ( %s ORDER BY %s ASC ) AS M' % ( sql_sel, self.__rownum, sql_pri, sql_field)
             sql = '%s FROM ( %s ) Z WHERE' % ( sql_sel, sql )
-            
+
             if self.query.low_mark != 0:
                 sql = '%s "%s" > %d' % ( sql, self.__rownum, self.query.low_mark )
-                
+
             if self.query.low_mark != 0 and self.query.high_mark is not None:
                 sql = '%s AND ' % ( sql )
 
@@ -413,13 +413,13 @@ class SQLCompiler( compiler.SQLCompiler ):
                 params = []
             ret.append((col, (sql, params), alias))
         return ret
-    
+
     def __map23(self, value, field):
         if sys.version_info >= (3, ):
             return zip_longest(value, field)
         else:
             return map(None, value, field)
-        
+
     #This function  convert 0/1 to boolean type for BooleanField/NullBooleanField
     def resolve_columns( self, row, fields = () ):
         values = []
@@ -429,7 +429,7 @@ class SQLCompiler( compiler.SQLCompiler ):
                 value = bool( value )
             values.append( value )
         return row[:index_extra_select] + tuple( values )
-    
+
     # For case insensitive search, converting parameter value to upper case.
     # The right hand side will get converted to upper case in the SQL itself.
     def __do_filter( self, children ):
