@@ -35,6 +35,7 @@ from django.db.models.expressions import OrderBy, RawSQL, Ref, Value, F, Func
 from django.utils.hashable import make_hashable
 from django.db.utils import DatabaseError
 from django.db.models.functions import Cast, Random
+from django import VERSION as djangoVersion
 FORCE = object()
 
 class FuncDB2(Func):
@@ -326,13 +327,23 @@ class SQLCompiler( compiler.SQLCompiler ):
 
         return sql, params
 
-    def pre_sql_setup(self):
+    def pre_sql_setup(self, with_col_aliases=False):
         """
         Do any necessary class setup immediately prior to producing SQL. This
         is for things that can't necessarily be done in __init__ because we
         might not have all the pieces in place at that time.
         """
-        extra_select, order_by, group_by = super().pre_sql_setup()
+
+        # In Django 4.2, pre_sql_setup() sprouted an optional
+        # parameter, which should probably be passed along to its
+        # super class. Check the Django version here to maintain
+        # backwards compatibility with older Django versions
+        #
+        # See: https://github.com/django/django/commit/8c3046daade8d9b019928f96e53629b03060fe73
+        if djangoVersion[0:2] >= (4, 2):
+            extra_select, order_by, group_by = super().pre_sql_setup(with_col_aliases=with_col_aliases)
+        else:
+            extra_select, order_by, group_by = super().pre_sql_setup()
 
         if group_by:
             group_by_list = []
