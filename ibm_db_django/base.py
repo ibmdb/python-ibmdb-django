@@ -425,9 +425,14 @@ class DatabaseWrapper( BaseDatabaseWrapper ):
                 if enforced[0][0] != 'N':
                     cursor.execute(each_query[0])
 
+
         cursor = self.cursor()
+
         if table_names is None:
-            cursor.execute("select 'ALTER TABLE ' || TRIM(tabname) || ' ALTER FOREIGN KEY ' || TRIM(constname) || ' NOT ENFORCED;' from syscat.references")
+            if not cursor.execute("SELECT CURRENT SCHEMA FROM SYSIBM.SYSDUMMY1;"):
+                return False
+            schema = cursor.fetchall()[0][0].strip()
+            cursor.execute("select 'ALTER TABLE ' || TRIM(tabname) || ' ALTER FOREIGN KEY ' || TRIM(constname) || ' NOT ENFORCED;' from syscat.references where tabschema='%s'" % schema)
             execute_query_fetched(cursor)
         else:
             for table_name in table_names:
@@ -456,7 +461,10 @@ class DatabaseWrapper( BaseDatabaseWrapper ):
 
             cursor = self.cursor()
             if table_names is None:
-                cursor.execute("select 'ALTER TABLE ' || TRIM(tabname) || ' ALTER FOREIGN KEY ' || TRIM(constname) || ' ENFORCED;' from syscat.references")
+                if not cursor.execute("SELECT CURRENT SCHEMA FROM SYSIBM.SYSDUMMY1;"):
+                    return False
+                schema = cursor.fetchall()[0][0].strip()
+                cursor.execute("select 'ALTER TABLE ' || TRIM(tabname) || ' ALTER FOREIGN KEY ' || TRIM(constname) || ' ENFORCED;' from syscat.references where tabschema='%s'" % schema)
                 execute_query_fetched(cursor)
             else:
                 for table_name in table_names:
