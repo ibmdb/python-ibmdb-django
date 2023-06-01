@@ -107,7 +107,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         if value is not None:
             value = field.get_db_prep_save(value, self.connection)
         return value
-    
+
     # return column definition DDL
     def column_sql(self, model, field, include_default=True, notnull=False):
         db_parameter = field.db_parameters(connection=self.connection)
@@ -176,7 +176,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         else:
             value = str(value)
         return value
-    
+
     def get_fk_name(self, model, field, suffix):
         def create_fk_name(*args, **kwargs):
             return self.quote_name(self._create_index_name(*args, **kwargs))
@@ -199,7 +199,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
             if constr_name is not None and constr_name.find('"', 1, len(constr_name)-1) > 0:
                 constr_name = constr_name.replace('"', '""')
             columns_list = []
-            if len(constr_dict['columns']) > 0:                
+            if len(constr_dict['columns']) > 0:
                 for cols in constr_dict['columns']:
                     if cols.find('"', 1, len(cols)-1) > 0:
                         columns_list.append(cols.replace('"', '""'))
@@ -231,7 +231,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
             for other_table in self.connection.introspection.get_table_list(cursor):
                 if ignore_self and other_table.name == table_name:
                     continue
-                constraints = self.connection.introspection._get_foreign_key_constraints(cursor, other_table.name)                
+                constraints = self.connection.introspection._get_foreign_key_constraints(cursor, other_table.name)
                 for key, constraint in constraints.items():
                     constraint_table, constraint_column = constraint['foreign_key']
                     if (constraint_table == table_name and
@@ -239,11 +239,11 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                         if other_table.name not in fk_constraints:
                             fk_constraints[other_table.name] = {}
                         fk_constraints[other_table.name][key] = constraint
-                        
+
         return fk_constraints
-    
+
     def alter_field(self, model, old_field, new_field, strict=False):
-                
+
         """
         Allow a field's type, uniqueness, nullability, default, column,
         constraints, etc. to be modified.
@@ -288,10 +288,10 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
 
     def _alter_field(self, model, old_field, new_field, old_type, new_type,
                      old_db_params, new_db_params, strict=False):
-        
+
         def create_fk_name(*args, **kwargs):
             return self.quote_name(self._create_index_name(*args, **kwargs))
-        
+
         """Perform a "physical" (non-ManyToMany) field update."""
         deferred_constraints = {
             'pk': {},
@@ -299,14 +299,14 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
             'unique': {},
             'index': {},
             'check': {}}
-        
+
         # Drop any FK constraints, we'll remake them later
         fks_dropped = set()
         if (
             self.connection.features.supports_foreign_keys and
             old_field.remote_field and
             old_field.db_constraint
-        ):        
+        ):
             fk_names = self._constraint_names(model, [old_field.column], foreign_key=True)
             if strict and len(fk_names) != 1:
                 raise ValueError("Found wrong number (%s) of foreign key constraints for %s.%s" % (
@@ -386,7 +386,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                 model, [old_field.column], check=True,
                 exclude=meta_constraint_names,
             )
-            
+
             if old_db_params['check']:
                 if strict and len(constraint_names) != 1:
                     raise ValueError("Found wrong number (%s) of check constraints for %s.%s" % (
@@ -403,7 +403,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                 for key, constraint in list(meta_constraints_check.items()):
                     if key not in meta_constraint_names:
                         del meta_constraints_check[key]
-                
+
         # Next, start accumulating actions to do
         actions = []
         null_actions = []
@@ -414,7 +414,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
             old_type = old_db_params['type']
             new_db_params = new_field.db_parameters(connection=self.connection)
             new_type = new_db_params['type']
-            
+
             #Now change datatype of foreign key tables.
             for _old_rel, new_rel in related_non_m2m_objects:
                 sql = self.sql_alter_column_type % {
@@ -431,18 +431,18 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         # Have they renamed the column?
         if old_field.column != new_field.column:
             #Need to change the field name
-            
-            # Drop incoming FK constraints for non-primary key fields 
+
+            # Drop incoming FK constraints for non-primary key fields
             fk_constraints = self._is_referenced_by_fk_constraint(model._meta.db_table, old_field.column, ignore_self=True)
             for table, contraints in fk_constraints.items():
                 for constr_name in contraints.keys():
                     self.execute(self.sql_delete_pk % {
                         'table': self.quote_name(table),
                         'name': self.quote_name(constr_name)})
-                    
+
             #Defer constraint check
             with self.connection.cursor() as cur:
-                constraints_pre = self.connection.introspection.get_constraints(cur, model._meta.db_table)                
+                constraints_pre = self.connection.introspection.get_constraints(cur, model._meta.db_table)
                 self._defer_constraints_check(constraints_pre, deferred_constraints, old_field, new_field, model, defer_pk=True, defer_unique=True, defer_index=True, defer_check=True)
 
             self.execute(
@@ -452,7 +452,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                     'new_column': self.quote_name(new_field.column),
                 }
             )
-            
+
             for i, sql in enumerate(self.deferred_sql):
                 if isinstance(sql, Statement):
                     sql.rename_column_references(model._meta.db_table, old_field.column, new_field.column)
@@ -464,14 +464,14 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                 for constraint in model_meta_constraints:
                     if constraint.name == constraint_name:
                         return constraint
-                
+
             for constraint_name, value in meta_constraints_check.items():
-                if constraint_name not in constraints_pre.keys():                    
-                    self.add_constraint(model, _get_meta_constraint_check(model._meta.constraints, constraint_name))                    
-                    
+                if constraint_name not in constraints_pre.keys():
+                    self.add_constraint(model, _get_meta_constraint_check(model._meta.constraints, constraint_name))
+
             deferred_constraints = self.get_missing_constraints(model, constraints_pre, deferred_constraints)
             self._restore_constraints_check(deferred_constraints, old_field, new_field, model)
-            
+
             #ALTER TABLE "SCHEMA_BOOK" ADD CONSTRAINT "SCHEMA_BOOK_AUTHOR_ID_C80C8297_FK_SCHEMA_AUTHOR_NAME" FOREIGN KEY ("AUTHOR_ID") REFERENCES "SCHEMA_AUTHOR" ("NAME"); (params ())
             for table, contraints in fk_constraints.items():
                 for constr_name, constraint in contraints.items():
@@ -486,16 +486,16 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                         suffix,
                         create_fk_name,
                     )
-                                                                                
+
                     self.execute(
                         self.sql_create_fk % {
-                            'table': self.quote_name(table),                            
+                            'table': self.quote_name(table),
                             'name': fk_name,
                             'column': column,
                             'to_table': to_table,
                             'to_column': to_column,
                         }
-                    )            
+                    )
 
         # When changing a column NULL constraint to NOT NULL with a given
         # default value, we need to perform 4 steps:
@@ -688,12 +688,12 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                 "changes": changes_sql,
             }
             self.execute(sql, params)
-        
+
         field._unique = unique
         # Add an index, if required
         self.deferred_sql.extend(self._field_indexes_sql(model, field))
         # Add any FK constraints later
-        
+
         if field.remote_field and self.connection.features.supports_foreign_keys and field.db_constraint:
             self.deferred_sql.append(self._create_fk_sql(model, field, "_fk_%(to_table)s_%(to_column)s"))
         # Reset connection if required
@@ -714,7 +714,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                 rel_condition = True
             else:
                 rel_condition = False
-                
+
         if isinstance(field, ManyToManyField) and rel_condition:
             return
         else:
@@ -744,11 +744,11 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                 other_pk = None
                 for other_pk in cur.connection.primary_keys( True, cur.connection.get_current_schema(), table):
                     self.execute(
-                        self.sql_drop_pk % {                        
-                            'table': self.quote_name(model._meta.db_table),                            
+                        self.sql_drop_pk % {
+                            'table': self.quote_name(model._meta.db_table),
                         }
                     )
-                    
+
                 if other_pk is None:
                     cur = self.connection.cursor()
                     table = self.quote_name(table)
@@ -757,11 +757,11 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                     other_pk = cur.fetchone()
                     if other_pk:
                         self.execute(
-                            self.sql_drop_pk % {                        
-                                'table': self.quote_name(model._meta.db_table),                            
+                            self.sql_drop_pk % {
+                                'table': self.quote_name(model._meta.db_table),
                             }
                         )
-                    
+
                     #Note: Need to check if we need to break from loop here after first execution.
                 sql = self.sql_create_pk % {'table': self.quote_name(model._meta.db_table), 'name': self.quote_name(self._create_index_name(model._meta.db_table, [field.column], suffix="_pk")), 'columns': self.quote_name(field.column)}
                 self.deferred_sql.append(sql)
@@ -778,11 +778,11 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                 cur = self.connection.cursor()
                 try:
                     table = model._meta.db_table.replace('""', '\"') if model._meta.db_table.count("\"") > 0 else model._meta.db_table
-                    table = self.quote_name(table)                    
+                    table = self.quote_name(table)
                     sql = "SELECT NAME, IDENTITY FROM SYSIBM.SYSCOLUMNS WHERE TBNAME=%(table)s and IDENTITY='Y'" % {'table': table.replace("\"","\'")}
                     cur.execute(sql)
                     identity = cur.fetchone()
-                    
+
                     if identity:
                         idy = identity[0]
                         if idy.count("\"") > 0:
@@ -806,7 +806,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         tmp_new_field.column = truncate_name( "%s%s" % ( self.psudo_column_prefix, tmp_new_field.column ), self.connection.ops.max_name_length() )
 
         self.__model = model
-        notnull = tmp_new_field.null        
+        notnull = tmp_new_field.null
         tmp_new_field.null = True
         p_key = tmp_new_field.primary_key
         tmp_new_field.primary_key = False
@@ -814,7 +814,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         tmp_new_field._unique = False
         if p_key or unique:
             notnull = True
-            
+
         _ , skip_post = self.add_field_pre(model, tmp_new_field, unique)
         if skip_post:
             return
@@ -878,7 +878,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         #Defer constraint check
         with self.connection.cursor() as cur:
             constraints_pre = self.connection.introspection.get_constraints(cur, old_db_table)
-        self._defer_constraints_check(constraints_pre, deferred_constraints, old_field, new_field, model, defer_pk=True, defer_unique=True, defer_index=True, defer_check=True, defer_fk=True, rename_table=old_db_table)        
+        self._defer_constraints_check(constraints_pre, deferred_constraints, old_field, new_field, model, defer_pk=True, defer_unique=True, defer_index=True, defer_check=True, defer_fk=True, rename_table=old_db_table)
 
         self.execute(self.sql_rename_table % {
             "old_table": self.quote_name(old_db_table),
@@ -908,7 +908,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         for sql in self.deferred_sql:
             if isinstance(sql, Statement):
                 sql.rename_table_references(old_db_table, new_db_table)
-        
+
     def _alter_many_to_many(self, model, old_field, new_field, strict):
         deferred_constraints = {
                           'pk': {},
@@ -917,7 +917,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                           'check': {}}
 
         if( djangoVersion[0:2] < ( 1, 9 ) ):
-            if ((old_field.rel is not None and hasattr(old_field.rel,'through')) and 
+            if ((old_field.rel is not None and hasattr(old_field.rel,'through')) and
                (new_field.rel is not None and hasattr(new_field.rel,'through'))):
                 old_field_rel_through = old_field.rel.through
                 rel_old_field = old_field.rel.through._meta.get_field(old_field.m2m_reverse_field_name())[0]
@@ -926,7 +926,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                 rel_old_field = None
                 rel_new_field = None
         else:
-            if((old_field.remote_field is not None and hasattr(old_field.remote_field,'through')) and 
+            if((old_field.remote_field is not None and hasattr(old_field.remote_field,'through')) and
                 (new_field.remote_field is not None and hasattr(new_field.remote_field,'through'))):
                 old_field_rel_through = old_field.remote_field.through
                 rel_old_field = old_field.remote_field.through._meta.get_field(old_field.m2m_reverse_field_name())
@@ -955,7 +955,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                 old_field.remote_field.through._meta.get_field(old_field.m2m_field_name()),
                 new_field.remote_field.through._meta.get_field(new_field.m2m_field_name()),
             )
-       
+
     def _reorg_tables(self):
         checkReorgSQL = "select TABSCHEMA, TABNAME from SYSIBMADM.ADMINTABINFO where REORG_PENDING = 'Y'"
         res = []
@@ -966,10 +966,10 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         if res:
             for sName, tName in res:
                 reorgSQL = '''CALL SYSPROC.ADMIN_CMD('REORG TABLE "%(sName)s"."%(tName)s"')''' % {'sName': sName, 'tName': tName}
-                reorgSQLs.append(reorgSQL)      
+                reorgSQLs.append(reorgSQL)
         for sql in reorgSQLs:
             self.execute(sql)
-        
+
     def _defer_constraints_check(self, constraints, deferred_constraints, old_field, new_field, model, defer_pk=False, defer_unique=False, defer_index=False, defer_check=False, defer_fk=False, rename_table=None):
         for constr_name, constr_dict in list(constraints.items()):
             old_col_name = ''
@@ -981,7 +981,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
             if constr_name is not None and constr_name.find('"', 1, len(constr_name)-1) > 0:
                 constr_name = constr_name.replace('"', '""')
             columns_list = []
-            if len(constr_dict['columns']) > 0:                
+            if len(constr_dict['columns']) > 0:
                 for cols in constr_dict['columns']:
                     if cols.find('"', 1, len(cols)-1) > 0:
                         columns_list.append(cols.replace('"', '""'))
@@ -1022,11 +1022,11 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                 elif defer_pk and constr_dict['primary_key'] is True and 'type' not in constr_dict.keys():
                     self.execute(self.sql_drop_pk % {
                                         'table': self.quote_name(model._meta.db_table if rename_table is None else rename_table),
-                                        })                    
+                                        })
                     deferred_constraints['pk'][constr_name] = columns_list
-            
+
         return deferred_constraints
-    
+
     def _restore_constraints_check(self, deferred_constraints, old_field, new_field, model, rename_table=None, old_table=None):
         def create_fk_name(*args, **kwargs):
             return self.quote_name(self._create_index_name(*args, **kwargs))
@@ -1063,7 +1063,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
             try:
                 if old_table is not None and index_name.find(old_table) != -1:
                     index_name = index_name.replace(old_table, rename_table)
-                if old_field is not None and index_name.find(old_field.column) != -1 and new_field is not None:                    
+                if old_field is not None and index_name.find(old_field.column) != -1 and new_field is not None:
                     index_name = index_name.replace(old_field.column, new_field.column)
                 self.execute(self.sql_create_index % {
                                     'table': self.quote_name(model._meta.db_table if rename_table is None else rename_table),
@@ -1077,7 +1077,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         for constr_name, columns in list(deferred_constraints['unique'].items()):
             if old_table is not None and constr_name.find(old_table) != -1:
                 constr_name = constr_name.replace(old_table, rename_table)
-            if old_field is not None and constr_name.find(old_field.column) != -1 and new_field is not None:                    
+            if old_field is not None and constr_name.find(old_field.column) != -1 and new_field is not None:
                 constr_name = constr_name.replace(old_field.column, new_field.column)
             self.execute(self.sql_create_unique % {
                                 'table': self.quote_name(model._meta.db_table if rename_table is None else rename_table),
@@ -1111,5 +1111,5 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
                     result.append(name)
         return result
 
-    def _index_condition_sql(self, condition):        
+    def _index_condition_sql(self, condition):
         return ''
