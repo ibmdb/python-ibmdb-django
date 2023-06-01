@@ -99,7 +99,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
     @property
     def sql_create_pk(self):
         self._reorg_tables()
-        return "ALTER TABLE %(table)s ADD CONSTRAINT %(name)s PRIMARY KEY (%(columns)s)"
+        return "ALTER TABLE %(table)s ADD CONSTRAINT %(name)s PRIMARY KEY (%(columns)s) ENFORCED"
 
     def effective_default(self, field):
         """Return a field's effective database default value."""
@@ -152,7 +152,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         if not field.null or notnull and 'DEFAULT' in sql:
             sql += " NOT NULL"
         if field.primary_key:
-            sql += " PRIMARY KEY"
+            sql += " PRIMARY KEY ENFORCED"
         elif field.unique:
             sql += " UNIQUE"
         tablespace = field.db_tablespace or model._meta.db_tablespace
