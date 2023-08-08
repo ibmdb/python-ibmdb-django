@@ -41,7 +41,7 @@ if ( djangoVersion[0:2] >= ( 1, 4) ):
 if ( djangoVersion[0:2] >= ( 1, 5 )) and ( djangoVersion[0:2] <= ( 2, 2 )):
     from django.utils import six
     import re
-elif ( djangoVersion[0:2] > (2, 2) ):
+elif ( djangoVersion[0:2] > ( 2, 2 )):
     import six
     import re
 
