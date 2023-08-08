@@ -39,7 +39,6 @@ if ( djangoVersion[0:2] >= ( 1, 4) ):
     from django.conf import settings
     import warnings
 if ( djangoVersion[0:2] >= ( 1, 5 )) and ( djangoVersion[0:2] <= ( 2, 2 )):
-    from django.utils.encoding import force_bytes, force_text
     from django.utils import six
     import re
 elif ( djangoVersion[0:2] > ( 2, 2 )):
