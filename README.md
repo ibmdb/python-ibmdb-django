@@ -9,9 +9,9 @@ The adapter has been developed and is supported by IBM
 
 # Prerequisites for Django on Python 
 
- * Install Python 2.7 or Python 3 <= 3.10.
-   The minimum python version supported by driver is python 2.7 and the latest version supported is python 3.10 except version 3.3 as it has reached end-of-life.
- * Django Framework 2.2.0 or 3.1 or 3.2
+ * Install Python 2.7 or Python 3 <= 3.11.4.
+   The minimum python version supported by driver is python 2.7 and the latest version supported is python 3.11.4 except version 3.3 as it has reached end-of-life.
+ * Django Framework 2.2.0 or 3.1 or 3.2 or 4.2
  * regex package version >= 2020.7.14 
  * IBM_DB driver and IBM_DB_DBI wrapper 1.0 or higher
    ``` 
@@ -44,6 +44,8 @@ For Django 3.1,
 	(or)
 For Django 3.2,
 	$ pip install ibm_db_django>=1.5.0.0  
+For Django 4.2,
+	$ pip install ibm_db_django>=1.5.3.0
 ```
  
 # Tested Operating Systems 
