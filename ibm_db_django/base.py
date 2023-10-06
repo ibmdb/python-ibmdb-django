@@ -144,6 +144,8 @@ class DatabaseFeatures( BaseDatabaseFeatures ):
     #as at many situations deferring adding constraints is needed.
     can_create_inline_fk = False
     supports_json_field_contains = False
+    supports_temporal_subtraction = True
+    allows_group_by_select_index = False
 
     @cached_property
     def introspected_field_types(self):
