@@ -29,14 +29,22 @@ if sys.version_info >= (3, ):
 from django import VERSION as djangoVersion
 
 import datetime
+import math
 from django.db.models.sql.query import get_order_dir
 from django.db.models.sql.constants import ORDER_DIR
 from django.db.models.expressions import OrderBy, RawSQL, Ref, Value, F, Func
 from django.utils.hashable import make_hashable
 from django.db.utils import DatabaseError
-from django.db.models.functions import Cast, Random
+from django.db.models.functions import Cast, Random, Pi
 from django import VERSION as djangoVersion
+
 FORCE = object()
+
+class PiDB2(Pi):
+    def as_sql(self, compiler, connection, **extra_context):
+        return super().as_sql(
+            compiler, connection, template=str(math.pi), **extra_context
+        )
 
 class FuncDB2(Func):
     def __init__(self, *expressions, output_field=None, **extra):
@@ -82,154 +90,14 @@ class SQLCompiler( compiler.SQLCompiler ):
                 funcDb2.function = node.function
                 funcDb2.source_expressions = node.source_expressions
                 sql, params = funcDb2.as_sql(self, self.connection )
+            elif isinstance(node, Pi):
+                piDb2 = PiDB2()
+                piDb2.function = node.function
+                piDb2.source_expressions = node.source_expressions
+                sql, params = piDb2.as_sql(self, self.connection )
             else:
                 sql, params = node.as_sql(self, self.connection)
         return sql, params
-
-    def get_order_by(self):
-        """
-        Return a list of 2-tuples of form (expr, (sql, params, is_ref)) for the
-        ORDER BY clause.
-
-        The order_by clause can alter the select clause (for example it
-        can add aliases to clauses that do not yet have one, or it can
-        add totally new select clauses).
-        """
-        if self.query.extra_order_by:
-            ordering = self.query.extra_order_by
-        elif not self.query.default_ordering:
-            ordering = self.query.order_by
-        elif self.query.order_by:
-            ordering = self.query.order_by
-        elif self.query.get_meta().ordering:
-            ordering = self.query.get_meta().ordering
-            self._meta_ordering = ordering
-        else:
-            ordering = []
-        if self.query.standard_ordering:
-            asc, desc = ORDER_DIR['ASC']
-        else:
-            asc, desc = ORDER_DIR['DESC']
-
-        order_by = []
-        for field in ordering:
-            if hasattr(field, 'resolve_expression'):
-                if isinstance(field, Value):
-                    # output_field must be resolved for constants.
-                    field = Cast(field, field.output_field)
-                if not isinstance(field, OrderBy):
-                    field = field.asc()
-                if not self.query.standard_ordering:
-                    field = field.copy()
-                    field.reverse_ordering()
-                    order_by.append((field, True))
-                else:
-                    order_by.append((field, False))
-                continue
-            if field == '?':  # random
-                order_by.append((OrderBy(Random()), False))
-                continue
-
-            col, order = get_order_dir(field, asc)
-            descending = order == 'DESC'
-
-            if col in self.query.annotation_select:
-                # Reference to expression in SELECT clause
-                order_by.append((
-                    OrderBy(Ref(col, self.query.annotation_select[col]), descending=descending),
-                    True))
-                continue
-            if col in self.query.annotations:
-                # References to an expression which is masked out of the SELECT
-                # clause.
-                if self.query.combinator and self.select:
-                    # Don't use the resolved annotation because other
-                    # combined queries might define it differently.
-                    expr = F(col)
-                else:
-                    expr = self.query.annotations[col]
-                    if isinstance(expr, Value):
-                        # output_field must be resolved for constants.
-                        expr = Cast(expr, expr.output_field)
-                order_by.append((OrderBy(expr, descending=descending), False))
-                continue
-
-            if '.' in field:
-                # This came in through an extra(order_by=...) addition. Pass it
-                # on verbatim.
-                table, col = col.split('.', 1)
-                order_by.append((
-                    OrderBy(
-                        RawSQL('%s.%s' % (self.quote_name_unless_alias(table), col), []),
-                        descending=descending
-                    ), False))
-                continue
-
-            if not self.query.extra or col not in self.query.extra:
-                if self.query.combinator and self.select:
-                    # Don't use the first model's field because other
-                    # combined queries might define it differently.
-                    order_by.append((OrderBy(F(col), descending=descending), False))
-                else:
-                    # 'col' is of the form 'field' or 'field1__field2' or
-                    # '-field1__field2__field', etc.
-                    order_by.extend(self.find_ordering_name(
-                        field, self.query.get_meta(), default_order=asc))
-            else:
-                if col not in self.query.extra_select:
-                    order_by.append((
-                        OrderBy(RawSQL(*self.query.extra[col]), descending=descending),
-                        False))
-                else:
-                    order_by.append((
-                        OrderBy(Ref(col, RawSQL(*self.query.extra[col])), descending=descending),
-                        True))
-        result = []
-        seen = set()
-
-        for expr, is_ref in order_by:
-            resolved = expr.resolve_expression(self.query, allow_joins=True, reuse=None)
-            if self.query.combinator and self.select:
-                src = resolved.get_source_expressions()[0]
-                expr_src = expr.get_source_expressions()[0]
-                # Relabel order by columns to raw numbers if this is a combined
-                # query; necessary since the columns can't be referenced by the
-                # fully qualified name and the simple column names may collide.
-                for idx, (sel_expr, _, col_alias) in enumerate(self.select):
-                    if is_ref and col_alias == src.refs:
-                        src = src.source
-                    elif col_alias and not (
-                        isinstance(expr_src, F) and col_alias == expr_src.name
-                    ):
-                        continue
-                    if src == sel_expr:
-                        resolved.set_source_expressions([RawSQL('%d' % (idx + 1), ())])
-                        break
-                else:
-                    if col_alias:
-                        raise DatabaseError('ORDER BY term does not match any column in the result set.')
-                    # Add column used in ORDER BY clause without an alias to
-                    # the selected columns.
-                    order_by_idx = len(self.query.select) + 1
-                    col_name = f'__orderbycol{order_by_idx}'
-                    for q in self.query.combined_queries:
-                        q.add_annotation(expr_src, col_name)
-                    self.query.add_select_col(src, col_name)
-                    resolved.set_source_expressions([RawSQL(f'{order_by_idx}', ())])
-
-            sql, params = self.compile(resolved)
-            # Don't add the same column twice, but the order direction is
-            # not taken into account so we strip it. When this entire method
-            # is refactored into expressions, then we can check each part as we
-            # generate it.
-            without_ordering = self.ordering_parts.search(sql)[1]
-            params_hash = make_hashable(params)
-            if (without_ordering, params_hash) in seen:
-                continue
-            seen.add((without_ordering, params_hash))
-            result.append((resolved, (sql, params, is_ref)))
-        return result
-
 
     # To get ride of LIMIT/OFFSET problem in DB2, this method has been implemented.
     def as_sql( self, with_limits=True, with_col_aliases=False, subquery=False ):

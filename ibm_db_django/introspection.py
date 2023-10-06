@@ -88,11 +88,13 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
         if data_type == Database.NUMBER and not _IS_JYTHON:
             if description.precision == 5:
                 return 'SmallIntegerField'
+            elif description.name in ('bool_field', 'null_bool_field'):
+                return 'BooleanField'
         
         if data_type == Database.TEXT and not _IS_JYTHON:
             if description.precision == 4194304:
                 return 'JSONField'
-            
+
         return super(DatabaseIntrospection, self).get_field_type(data_type, description)
     
     # Converting table name to lower case.
@@ -105,7 +107,7 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
 
         The default identifier converter is for case sensitive comparison.
         """
-        return name.upper()
+        return name.lower()
 
     # Getting the list of all tables, which are present under current schema.
     def get_table_list ( self, cursor ):
@@ -398,7 +400,7 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                     constraints[INDEX_NAME] = {
                         'columns': [],
                         'primary_key': True if UNIQUE_RULE == 'P' else False,
-                        'unique': False,
+                        'unique': True if UNIQUE_RULE == 'U' else False,
                         'foreign_key': None,
                         'check': False,
                         'index': True,

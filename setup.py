@@ -32,7 +32,7 @@ setup (
     license           = LICENSE,
     platforms         = 'All',
     install_requires  = _IS_JYTHON and ['django==2.2']
-                         or ['ibm_db>=3.0.1', 'django>=3.2.0', 'six', 'regex'],
+                         or ['ibm_db>=3.0.1', 'django>=4.2', 'six', 'regex'],
     dependency_links  = _IS_JYTHON and ['http://pypi.python.org/pypi/Django/'] or ['http://pypi.python.org/pypi/ibm_db/',
                           'http://pypi.python.org/pypi/Django/'],
     description       = 'DB2 support for Django framework.',

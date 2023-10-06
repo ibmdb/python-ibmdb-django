@@ -132,7 +132,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
             elif not self.skip_default(field):
                 value = self.effective_default(field)
                 internal_type = field.get_internal_type()
-                if value is not None and value is not '':
+                if value is not None and value != '':
                     if internal_type == 'TimeField' or internal_type == 'UUIDField' or internal_type == 'TextField':
                         sql += " DEFAULT '%s'" % value
                     else:
@@ -251,7 +251,8 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
         If `strict` is True, raise errors if the old column does not match
         `old_field` precisely.
         """
-        if not self._field_should_be_altered(old_field, new_field):
+        state = self._field_should_be_altered(old_field, new_field)
+        if not state:
             return
         # Ensure this field is even column-based
         old_db_params = old_field.db_parameters(connection=self.connection)
@@ -571,7 +572,7 @@ class DB2SchemaEditor(BaseDatabaseSchemaEditor):
             self._delete_primary_key(model, strict)
         # Added a unique?
         if self._unique_should_be_added(old_field, new_field):
-            self.execute(self._create_unique_sql(model, [new_field.column]))
+            self.execute(self._create_unique_sql(model, [new_field]))
         # Added an index? Add an index if db_index switched to True or a unique
         # constraint will no longer be used in lieu of an index. The following
         # lines from the truth table show all True cases; the rest are False:

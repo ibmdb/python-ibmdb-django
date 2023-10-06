@@ -21,6 +21,7 @@ try:
     from django.db.backends import BaseDatabaseOperations
 except ImportError:
     from django.db.backends.base.operations import BaseDatabaseOperations
+from django.db.backends.utils import split_tzname_delta
 from django.utils.duration import duration_microseconds
 from ibm_db_django import query
 from django import VERSION as djangoVersion
@@ -37,7 +38,6 @@ if ( djangoVersion[0:2] > ( 1, 1 ) ):
     
 _IS_JYTHON = sys.platform.startswith( 'java' )
 if( djangoVersion[0:2] >= ( 1, 4 ) ):
-    from django.utils.timezone import is_aware, is_naive, utc 
     from django.conf import settings
 
 if _IS_JYTHON:
@@ -212,17 +212,18 @@ class DatabaseOperations ( BaseDatabaseOperations ):
     
     # Function to extract day, month or year from the date.
     # Reference: http://publib.boulder.ibm.com/infocenter/db2luw/v9r5/topic/com.ibm.db2.luw.sql.ref.doc/doc/r0023457.html
-    def date_extract_sql( self, lookup_type, field_name ):
+    def date_extract_sql( self, lookup_type, sql, params ):
         if lookup_type.upper() == 'WEEK_DAY':
-            return " DAYOFWEEK(%s) " % ( field_name )
+            return f" DAYOFWEEK({sql}) " , params
         elif lookup_type.upper() == 'ISO_YEAR':
-            return " TO_CHAR(%s, 'IYYY')" % field_name
+            return f" TO_CHAR({sql}, 'IYYY')" , params
         elif lookup_type.upper() == 'WEEK':
-            return " WEEK_ISO(%s) " % field_name
+            return f" WEEK_ISO({sql}) " , params
         elif lookup_type.upper() == 'ISO_WEEK_DAY':            
-            return "DAYOFWEEK_ISO(%s)" % field_name
+            return f"DAYOFWEEK_ISO({sql})" , params
         else:
-            return " %s(%s) " % ( lookup_type.upper(), field_name )
+            sql = f" %s({sql}) " % lookup_type.upper()
+            return sql, params
     
     def _get_utcoffset(self, tzname):
         if pytz is None and tzname is not None:
@@ -232,7 +233,7 @@ class DatabaseOperations ( BaseDatabaseOperations ):
             min = 0
             tz = pytz.timezone(tzname)
             td = tz.utcoffset(datetime.datetime(2012,1,1))
-            if td.days is -1:
+            if td.days == -1:
                 min = (td.seconds % (60*60))/60 - 60
                 if min:
                     hr = td.seconds/(60*60) - 23
@@ -244,46 +245,46 @@ class DatabaseOperations ( BaseDatabaseOperations ):
             return hr, min
             
     # Function to extract time zone-aware day, month or day of week from timestamps   
-    def datetime_extract_sql(self, lookup_type, field_name, tzname):
-        if settings.USE_TZ:
-            hr, min = self._get_utcoffset(tzname)
-            if hr < 0:
-                field_name = "%s - %s HOURS - %s MINUTES" % (field_name, -hr, -min)
-            else:
-                field_name = "%s + %s HOURS + %s MINUTES" % (field_name, hr, min)
+    def datetime_extract_sql(self, lookup_type, sql, params, tzname):
+        sql, params = self._convert_sql_to_tz(sql, params, tzname)
+        return self.date_extract_sql(lookup_type, sql, params)
 
-        return self.date_extract_sql(lookup_type, field_name)
-            
     # Truncating the date value on the basic of lookup type.
     # e.g If input is 2008-12-04 and month then output will be 2008-12-01 00:00:00
     # Reference: http://www.ibm.com/developerworks/data/library/samples/db2/0205udfs/index.html
-    def date_trunc_sql( self, lookup_type, field_name, tzname=None ):
-        #As DB2 LUW doesn't support timezone, we comment below line for now. 
-        #field_name = self._convert_field_to_tz(field_name, tzname)
-        return "DATE_TRUNC('%s', %s)" % (lookup_type, field_name)
+    # Note: For zos we may need to modify this
+    def date_trunc_sql(self, lookup_type, sql, params, tzname=None):
+        sql, params = self._convert_sql_to_tz(sql, params, tzname)
+        return f"DATE_TRUNC(%s, {sql})", (lookup_type, *params)
+
+    def _prepare_tzname_delta(self, tzname):
+        tzname, sign, offset = split_tzname_delta(tzname)
+        return f"{sign}{offset}" if offset else tzname
+
+    def _convert_sql_to_tz(self, sql, params, tzname):
+        if tzname and settings.USE_TZ and self.connection.timezone_name != tzname:
+            return f"TIMEZONE_TZ({sql}, %s)", (
+                *params,
+                self._prepare_tzname_delta(tzname),
+            )
+        return sql, params
     
     # Truncating the time zone-aware timestamps value on the basic of lookup type
-    def datetime_trunc_sql( self, lookup_type, field_name, tzname ):
-        if settings.USE_TZ: #Timezone not supported in DB2 LUW
-            hr, min = self._get_utcoffset(tzname)
-            if hr < 0:
-                field_name = "%s - %s HOURS - %s MINUTES" % (field_name, -hr, -min)
-            else:
-                field_name = "%s + %s HOURS + %s MINUTES" % (field_name, hr, min)
-        return self.date_trunc_sql(lookup_type, field_name)
+    # Note: For zos we may need to modify this
+    def datetime_trunc_sql(self, lookup_type, sql, params, tzname):
+        return self.date_trunc_sql(lookup_type, sql, params, tzname)
 
-    def time_trunc_sql(self, lookup_type, field_name, tzname=None):
-        return "DATE_TRUNC('%s', %s)::time" % (lookup_type, field_name)
+    def time_trunc_sql(self, lookup_type, sql, params, tzname=None):
+        sql, params = self._convert_sql_to_tz(sql, params, tzname)
+        return f"DATE_TRUNC(%s, {sql})::time", (lookup_type, *params)
 
-    def datetime_cast_date_sql(self, field_name, tzname):
-        if settings.USE_TZ: #Timezone not supported in DB2 LUW
-            pass
-        return '(%s)::date' % field_name
+    def datetime_cast_date_sql(self, sql, params, tzname):
+        sql, params = self._convert_sql_to_tz(sql, params, tzname)
+        return f'({sql})::date' , params
 
-    def datetime_cast_time_sql(self, field_name, tzname):
-        if settings.USE_TZ: #Timezone not supported in DB2 LUW
-            pass
-        return "VARCHAR_FORMAT(%s, 'HH24:MI:SS.US')" % field_name
+    def datetime_cast_time_sql(self, sql, params, tzname):
+        sql, params = self._convert_sql_to_tz(sql, params, tzname)
+        return f"TIME({sql})", params
 
     if( djangoVersion[0:2] >= ( 1, 8 ) ): 
         def date_interval_sql( self, timedelta ):
@@ -377,6 +378,8 @@ class DatabaseOperations ( BaseDatabaseOperations ):
         
     # Function to quote the name of schema, table and column.
     def quote_name( self, name = None):
+        if name == None:
+            return None
         name = name.upper()
         
         if( name.startswith( '""' ) & name.endswith( '""' ) ):
@@ -595,7 +598,7 @@ class DatabaseOperations ( BaseDatabaseOperations ):
             else:
                 return value
         else:
-            if is_aware(value):
+            if timezone.is_aware(value):
                 if settings.USE_TZ:
                     value = value.astimezone( utc ).replace( tzinfo=None )
                 else:
@@ -613,19 +616,10 @@ class DatabaseOperations ( BaseDatabaseOperations ):
             else:
                 return value
         else:
-            if is_aware(value):
+            if timezone.is_aware(value):
                 raise ValueError( "Timezone aware time not supported" )
             else:
                 return value
-                    
-    def year_lookup_bounds_for_date_field( self, value ):
-        if sys.version_info.major >= 3:
-            lower_bound = datetime.date(int(value), 1, 1)
-            upper_bound = datetime.date(int(value), 12, 31)
-        else:
-            lower_bound = datetime.date(int(value), 1, 1)
-            upper_bound = datetime.date(int(value), 12, 31)
-        return [lower_bound, upper_bound]
     
     def bulk_insert_sql(self, fields, num_values):
         placeholder_rows_sql = (", ".join(row) for row in num_values)
