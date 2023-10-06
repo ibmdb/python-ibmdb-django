@@ -38,7 +38,6 @@ if ( djangoVersion[0:2] > ( 1, 1 ) ):
     
 _IS_JYTHON = sys.platform.startswith( 'java' )
 if( djangoVersion[0:2] >= ( 1, 4 ) ):
-    #from django.utils.timezone import is_aware, is_naive, utc
     from django.conf import settings
 
 if _IS_JYTHON:
