@@ -93,6 +93,8 @@ class DatabaseFeatures( BaseDatabaseFeatures ):
 
     #transaction is supported by DB2
     supports_transactions = True
+    #Support for atomic migrations
+    can_rollback_ddl = True
 
     supports_tablespaces = True
 
