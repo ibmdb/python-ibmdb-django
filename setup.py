@@ -24,6 +24,7 @@ from distutils.core import setup, Extension
 PACKAGE = 'ibm_db_django'
 VERSION = __import__('ibm_db_django').__version__
 LICENSE = 'Apache License 2.0'
+readme = os.path.join(os.path.dirname(__file__), 'README.md')
 extra = {}
     
 setup (
@@ -36,11 +37,11 @@ setup (
     dependency_links  = _IS_JYTHON and ['http://pypi.python.org/pypi/Django/'] or ['http://pypi.python.org/pypi/ibm_db/',
                           'http://pypi.python.org/pypi/Django/'],
     description       = 'DB2 support for Django framework.',
-    long_description  = 'DB2 support for Django framework.',
-    author            = 'Ambrish Bhargava, Tarun Pasrija, Rahul Priyadarshi',
-    author_email      = 'opendev@us.ibm.com',
-    maintainer        = 'IBM Application Development Team',
-    maintainer_email  = 'opendev@us.ibm.com, ibm_db@googlegroups.com',
+    long_description  = open(readme).read(),
+    author            = 'Praveen Narayanappa',
+    author_email      = 'praveen.narayanappa1@ibm.com',
+    maintainer        = 'Db2Connect Driver Development Team',
+    maintainer_email  = 'bimal.jha1@ibm.com',
     url               = 'http://pypi.python.org/pypi/ibm_db_django/',
     keywords          = 'django ibm_db_django backends adapter IBM Data Servers database db2',
     packages          = ['ibm_db_django'],
