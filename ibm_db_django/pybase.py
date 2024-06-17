@@ -407,7 +407,10 @@ class DB2CursorWrapper( Database.Cursor ):
                 index = index + 1
                 if ( desc[1] == Database.DATETIME ):
                     if settings.USE_TZ and value is not None and timezone.is_naive( value ):
-                        value = value.replace( tzinfo=timezone.utc )
+                        if ( djangoVersion[0:2] >= (4, 1 ) ):
+                            value = value.replace( tzinfo=datetime.timezone.utc )
+                        else:
+                            value = value.replace( tzinfo=timezone.utc )
                         row[index] = value
                 elif ( djangoVersion[0:2] >= (1, 5 ) ):
                     if isinstance(value, six.string_types):
