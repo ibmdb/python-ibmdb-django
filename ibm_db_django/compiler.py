@@ -146,6 +146,24 @@ class SQLCompiler( compiler.SQLCompiler ):
                 sql_sel = "SELECT DISTINCT"
 
             sql_select_token = sql_split[0].split( "," )
+            # rejoin items that use comma in a db function
+            new_sql_select_token = []
+            paren_count = 0
+            column_fragment = None
+            for column in sql_select_token:
+                paren_count += column.count('(') - column.count(')')
+                if paren_count > 0:
+                    if column_fragment:
+                        column_fragment = ', '.join([column_fragment, column])
+                    else:
+                        column_fragment = column
+                elif paren_count == 0 and column_fragment:
+                    new_sql_select_token.append(', '.join([column_fragment, column]))
+                    column_fragment = None
+                else:
+                    new_sql_select_token.append(column)
+            sql_select_token = new_sql_select_token
+
             i = 0
             first_field_no = 0
             while ( i < len( sql_select_token ) ):
@@ -161,10 +179,11 @@ class SQLCompiler( compiler.SQLCompiler ):
                     i = i + 4
                     continue
 
-                if sql_select_token[i].count( " AS " ) == 1:
-                    temp_col_alias = sql_select_token[i].split( " AS " )
+                if sql_select_token[i].count( ' AS "' ) == 1:
+                    # split only on column aliases not "AS varchar" for instance
+                    temp_col_alias = sql_select_token[i].split( ' AS "' )
                     sql_pri = '%s %s,' % ( sql_pri, sql_select_token[i] )
-                    sql_sel = "%s %s," % ( sql_sel, temp_col_alias[1] )
+                    sql_sel = '%s "%s,' % ( sql_sel, temp_col_alias[1] )
                     i = i + 1
                     continue
 
