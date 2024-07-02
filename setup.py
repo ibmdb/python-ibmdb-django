@@ -15,6 +15,7 @@
 # | Authors: Ambrish Bhargava, Tarun Pasrija, Rahul Priyadarshi              |
 # +--------------------------------------------------------------------------+
 
+import os
 import sys
 
 _IS_JYTHON = sys.platform.startswith('java')
