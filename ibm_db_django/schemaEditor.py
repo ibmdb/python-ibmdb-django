@@ -72,6 +72,7 @@ def _related_non_m2m_objects(old_field, new_field):
 
 class DB2SchemaEditor(BaseDatabaseSchemaEditor):
     psudo_column_prefix = 'psudo_'
+    sql_create_table = "CREATE TABLE %(table)s (%(definition)s) ORGANIZE BY ROW"
     sql_delete_table = "DROP TABLE %(table)s"
     sql_rename_table = "RENAME TABLE %(old_table)s TO %(new_table)s"
     sql_create_column = "ALTER TABLE %(table)s ADD COLUMN %(column)s %(definition)s"
