@@ -243,6 +243,9 @@ class DatabaseWrapper( BaseDatabaseWrapper ):
             self.validation = DatabaseValidation( self )
         self.databaseWrapper = Base.DatabaseWrapper()
 
+        # IBM DB2 version 11.1 suports natively LIMIT/OFFSET - see #112
+        self.supports_limit_offset = (self.get_server_version()[:2] >= (11, 1))
+
     # Method to check if connection is live or not.
     def __is_connection( self ):
         return self.connection is not None

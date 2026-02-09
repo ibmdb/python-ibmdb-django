@@ -99,6 +99,13 @@ class SQLCompiler( compiler.SQLCompiler ):
                 sql, params = node.as_sql(self, self.connection)
         return sql, params
 
+    @staticmethod
+    def _move_for_update_sql_to_end(sql):
+        if sql.find(' WITH RS USE AND KEEP UPDATE LOCKS') != -1:
+            sql = sql.replace(' WITH RS USE AND KEEP UPDATE LOCKS','')
+            sql = sql + (' WITH RS USE AND KEEP UPDATE LOCKS')
+        return sql
+
     # To get ride of LIMIT/OFFSET problem in DB2, this method has been implemented.
     def as_sql( self, with_limits=True, with_col_aliases=False, subquery=False ):
         self.subquery = subquery
@@ -114,17 +121,20 @@ class SQLCompiler( compiler.SQLCompiler ):
                     if fieldType == 'TextField':
                         self.query.distinct = False
                         break
-        if not ( with_limits and ( self.query.high_mark is not None or self.query.low_mark ) ):
-            sql, params = super( SQLCompiler, self ).as_sql( False, with_col_aliases )
-            if sql.find(' WITH RS USE AND KEEP UPDATE LOCKS') != -1:
-                sql = sql.replace(' WITH RS USE AND KEEP UPDATE LOCKS','')
-                sql = sql + (' WITH RS USE AND KEEP UPDATE LOCKS')
-            return sql, params
+
+        if self.connection.supports_limit_offset:
+            # IBM DB2 version 11.1 suports natively LIMIT/OFFSET (see #112), 
+            # thus no need for special logic -> use standard django sql construction logic 
+            sql, params = super( SQLCompiler, self ).as_sql( with_limits=with_limits, with_col_aliases=with_col_aliases )
+            sql = self._move_for_update_sql_to_end(sql)
+        elif not ( with_limits and ( self.query.high_mark is not None or self.query.low_mark ) ):
+            sql, params = super( SQLCompiler, self ).as_sql( with_limits=False, with_col_aliases=with_col_aliases )
+            sql = self._move_for_update_sql_to_end(sql)
         else:
-            sql_ori, params = super( SQLCompiler, self ).as_sql( False, with_col_aliases )
-            if sql_ori.find(' WITH RS USE AND KEEP UPDATE LOCKS') != -1:
-                sql_ori = sql_ori.replace(' WITH RS USE AND KEEP UPDATE LOCKS','')
-                sql_ori = sql_ori + (' WITH RS USE AND KEEP UPDATE LOCKS')
+            # TODO: consider moving this logic to a special function, i.e.: def _add_sql_for_limit_offset_with_rownumber_over()
+            sql_ori, params = super( SQLCompiler, self ).as_sql( with_limits=False, with_col_aliases=with_col_aliases )
+            sql_ori = self._move_for_update_sql_to_end(sql_ori)
+
             if sql_ori.count( "%%s" ) > 0:
                 sql_ori = sql_ori.replace("%%s", "%s")
             if self.query.low_mark == 0:
