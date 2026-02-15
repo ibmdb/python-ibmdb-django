@@ -39,6 +39,7 @@ setup (
                           'http://pypi.python.org/pypi/Django/'],
     description       = 'DB2 support for Django framework.',
     long_description  = open(readme).read(),
+    long_description_content_type='text/markdown',
     author            = 'IBM Application Development Team',
     author_email      = 'praveen.narayanappa1@ibm.com',
     maintainer        = 'Db2Connect Driver Development Team',
