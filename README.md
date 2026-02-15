@@ -58,13 +58,9 @@ For Django 5.2,
 
 # Supported Databases 
 
- * IBM DB2 Database for Linux, Unix and Windows, version 8.2 or higher.
+ * IBM DB2 Database for Linux, Unix and Windows, version 11.5 or higher.
 
 # Future Supported Databases 
-
- * IBM Cloudscape
- * Apache Derby
- * IBM Informix Cheetah version 11.10 onwards
  * Remote connections to i5/OS (iSeries)
 
 # Testing 
