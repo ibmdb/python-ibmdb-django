@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2021.                                      |
+# | (C) Copyright IBM Corporation 2009-2026.                                 |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -13,8 +13,7 @@
 # | KIND, either express or implied. See the License for the specific        |
 # | language governing permissions and limitations under the License.        |
 # +--------------------------------------------------------------------------+
-# | Authors: Ambrish Bhargava, Tarun Pasrija, Rahul Priyadarshi,             |
-# | Hemlata Bhatt, Vyshakh A                                                 |
+# | Authors: IBM Application Development Team                                |
 # +--------------------------------------------------------------------------+
 
 try:
@@ -26,8 +25,12 @@ from django.utils.duration import duration_microseconds
 from ibm_db_django import query
 from django import VERSION as djangoVersion
 import sys, datetime, uuid
+import re
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime, parse_time
+from django.db.models import DateField, DateTimeField, TimeField, DurationField
+from .expressions import DurationValue
+
 try:
     import pytz
 except ImportError:
@@ -122,6 +125,11 @@ class DatabaseOperations ( BaseDatabaseOperations ):
         """
         return converters
     
+    def convert_durationfield_value(self, value, expression, connection):
+        if value is not None:
+            return datetime.timedelta(0, 0, microseconds=int(value))
+        return value
+    
     def convert_datetimefield_value(self, value, expression, connection):
         if value is not None:
             if not isinstance(value, datetime.datetime):
@@ -182,7 +190,24 @@ class DatabaseOperations ( BaseDatabaseOperations ):
 
         return 'DATE(\'' + str(value) +'\')'
 
-    def combine_expression( self, operator, sub_expressions ):
+    def combine_expression( self, parent_self, operator, sub_expressions ):
+        lhs_field = None
+        rhs_field = None
+        
+        try: 
+            if hasattr(parent_self.lhs, "output_field"):
+                lhs_field = parent_self.lhs.output_field
+        except Exception: 
+            pass
+        
+        try: 
+            if hasattr(parent_self.rhs, "output_field"):
+                rhs_field = parent_self.rhs. output_field
+        except Exception: 
+            pass
+        
+        lhs, rhs = sub_expressions     
+        
         if operator == '%%':
             return 'MOD(%s, %s)' % ( sub_expressions[0], sub_expressions[1] ) 
         elif operator == '&':
@@ -193,22 +218,171 @@ class DatabaseOperations ( BaseDatabaseOperations ):
             return 'POWER(%s, %s)' % ( sub_expressions[0], sub_expressions[1] )
         elif operator == '#':
             return 'BITXOR(%s, %s)' % ( sub_expressions[0], sub_expressions[1] )
-        elif operator == '-':
-            if( djangoVersion[0:2] >= ( 2 , 0) ):
-                strr= str(sub_expressions[1])
-                sub_expressions[1] = strr.replace('+', '-')
+        elif operator == '-':    
+            def is_literal_duration(expr):
+                return isinstance(expr, str) and any(unit in expr.upper() for unit in ("DAYS", "HOURS", "MINUTES", "SECONDS", "MICROSECONDS"))
+            
+            def extract_microseconds_or_days_from_literal(rhs_str):
+                import re
+            
+                if isinstance(rhs_str, str):
+                    rhs_str = rhs_str.strip().lower()
+            
+                    # Format: "44130747000 microseconds"
+                    direct_match = re.fullmatch(r"(\d+)\s+(microseconds|days)", rhs_str, re.IGNORECASE)
+                    if direct_match:
+                        return f"{direct_match.group(1)} {direct_match.group(2)}"
+            
+                    # Format: "1 days + 44130 seconds + 747000 microseconds"
+                    matches = re.findall(r"(\d+)\s+(days|seconds|microseconds)", rhs_str)
+                    unit_multipliers = {
+                        "days": 86400 * 1_000_000,
+                        "seconds": 1_000_000,
+                        "microseconds": 1,
+                    }
+                    ms = sum(int(val) * unit_multipliers[unit] for val, unit in matches)
+                    return f"{ms} microseconds"
+            
+                elif hasattr(rhs_str, "days"):  # actual timedelta
+                    return (
+                        rhs_str.days * 86400 * 1_000_000 +
+                        rhs_str.seconds * 1_000_000 +
+                        rhs_str.microseconds
+                    )
+            
+                raise TypeError(f"Unsupported duration format: {rhs_str}")
+        
+            # datetime - datetime
+            if isinstance(lhs_field, (DateTimeField, DateField, TimeField)) and isinstance(rhs_field, (DateTimeField, DateField, TimeField)):
+                lhs_cast = f"CAST({lhs} AS TIMESTAMP)" if isinstance(lhs_field, TimeField) else lhs
+                rhs_cast = f"CAST({rhs} AS TIMESTAMP)" if isinstance(rhs_field, TimeField) else rhs
+                return (
+                    f"(((BIGINT(DAYS({lhs_cast})) - BIGINT(DAYS({rhs_cast}))) * 86400 + "
+                    f"(BIGINT(MIDNIGHT_SECONDS({lhs_cast})) - BIGINT(MIDNIGHT_SECONDS({rhs_cast})))) * 1000000 + "
+                    f"(BIGINT(MICROSECOND({lhs_cast})) - BIGINT(MICROSECOND({rhs_cast}))))"
+                )
+        
+            # datetime - duration
+            if isinstance(lhs_field, (DateTimeField, DateField)) and isinstance(rhs_field, DurationField):
+                if is_literal_duration(rhs):
+                    days_or_ms = extract_microseconds_or_days_from_literal(rhs)
+                    return f"{lhs} - {days_or_ms}"
+                    #return f"{lhs} - {rhs}"
+                if isinstance(lhs_field, DateField):
+                    return f"{lhs} - ({rhs} / 86400000000)"
+                return (
+                    f"{lhs} - ("
+                    f"BIGINT({rhs} / 1000000) + "
+                    f"DECIMAL(MOD({rhs}, 1000000), 20, 6) / 1000000"
+                    f") SECONDS"
+                )
+        
+            # duration - duration
+            if isinstance(lhs_field, DurationField) and isinstance(rhs_field, DurationField):
+                return f"{lhs} - {rhs}"
+            
+            # Graceful handling for NULL values
+            if lhs.upper() == "NULL" or rhs.upper() == "NULL":
+                return "NULL"
+        
+            if djangoVersion[0:2] >= (2, 0):
+                strr = str(rhs)
+                rhs = strr.replace('+', '-')
             else:
-                sub_expressions[1] = str.replace('+', '-')
-            return super( DatabaseOperations, self ).combine_expression( operator, sub_expressions )
+                rhs = rhs.replace('+', '-')
+        
+            return super( DatabaseOperations, self ).combine_expression( operator, [lhs, rhs] )
+        elif operator == "+":                    
+            def is_literal_duration(expr):
+                return isinstance(expr, str) and any(unit in expr.upper() for unit in ("DAYS", "HOURS", "MINUTES", "SECONDS", "MICROSECONDS"))
+    
+             # datetime/date + duration
+            if isinstance(lhs_field, (DateField, DateTimeField)) and isinstance(rhs_field, DurationField):
+                if is_literal_duration(rhs):
+                    return f"{lhs} + {rhs}"
+                
+                if isinstance(lhs_field, DateTimeField):
+                    # lhs = datetime, rhs = duration (microseconds)
+                    return (
+                        f"{lhs} + ("
+                        f"BIGINT({rhs} / 1000000) + "
+                        f"DECIMAL(MOD({rhs}, 1000000), 20, 6) / 1000000"
+                        f") SECONDS"
+                    )                
+                elif isinstance(lhs_field, DateField):
+                    return f"{lhs} + ({rhs} / 86400000000)"
+                
+        
+            if isinstance(rhs_field, (DateField, DateTimeField)) and isinstance(lhs_field, DurationField):
+                if is_literal_duration(lhs):
+                    return f"{rhs} + {lhs}"
+                if isinstance(rhs_field, DateField):
+                    return f"{rhs} + ({lhs} / 86400000000)"
+                # lhs = duration, rhs = datetime
+                return (
+                    f"{rhs} + ("
+                    f"BIGINT({lhs} / 1000000) + "
+                    f"DECIMAL(MOD({lhs}, 1000000), 20, 6) / 1000000"
+                    f") SECONDS"
+                )
+        
+            # duration + duration
+            if isinstance(lhs_field, DurationField) and isinstance(rhs_field, DurationField):
+                # Handle raw DurationValue on RHS (like timedelta(0))
+                if isinstance(parent_self.rhs, DurationValue):
+                    total_microseconds = int(parent_self.rhs.value.total_seconds() * 1_000_000)
+                    return f"{lhs} + {total_microseconds}"
+                
+                # Handle raw DurationValue on LHS
+                if isinstance(parent_self.lhs, DurationValue):
+                    total_microseconds = int(parent_self.lhs.value.total_seconds() * 1_000_000)
+                    return f"{total_microseconds} + {rhs}"
+                
+                return f"{lhs} + {rhs}"
+            
+            if lhs.upper() == "NULL" or rhs.upper() == "NULL":
+                return "NULL"
+            
+            # Fallback to default for non-temporal additions
+            return super( DatabaseOperations, self ).combine_expression( operator, [lhs, rhs] )
+        elif operator == "*":
+            def cast_if_needed(expr, is_const):
+                return f"CAST({expr} AS DECIMAL(20, 6))" if is_const else f"DECIMAL({expr}, 20, 6)"
+        
+            lhs_is_const = hasattr(parent_self.lhs, "value")
+            rhs_is_const = hasattr(parent_self.rhs, "value")
+        
+            if isinstance(lhs_field, DurationField) or isinstance(rhs_field, DurationField):
+                lhs_casted = cast_if_needed(lhs, lhs_is_const)
+                rhs_casted = cast_if_needed(rhs, rhs_is_const)
+                return f"{lhs_casted} * {rhs_casted}"
+        
+            return super().combine_expression(operator, [lhs, rhs])
+        
+        elif operator == "/":
+            lhs_is_const = hasattr(parent_self.lhs, "value")
+            rhs_is_const = hasattr(parent_self.rhs, "value")
+        
+            if isinstance(lhs_field, DurationField):
+                lhs_casted = f"DECIMAL({lhs}, 20, 6)" if not lhs_is_const else f"CAST({lhs} AS DECIMAL(20, 6))"
+                rhs_casted = f"DECIMAL({rhs}, 20, 6)" if not rhs_is_const else f"CAST({rhs} AS DECIMAL(20, 6))"
+                return f"{lhs_casted} / {rhs_casted}"
+        
+            return super().combine_expression(operator, [lhs, rhs])
         else:
             return super( DatabaseOperations, self ).combine_expression( operator, sub_expressions )
+    
+    def combine_duration_expression(self, parent_self, connector, sub_expressions):
+        return self.combine_expression(parent_self, connector, sub_expressions)
     
     def convert_binaryfield_value( self,value, expression,connections ):
         return value
 
     if( djangoVersion[0:2] >= ( 1, 8 ) ):
-        def format_for_duration_arithmetic(self, sql):
-            return ' %s MICROSECONDS' % sql
+        def format_for_duration_arithmetic(self, sql):             
+            if '%s' in sql:
+                return ' %s MICROSECONDS' % sql
+            return sql
     
     # Function to extract day, month or year from the date.
     # Reference: http://publib.boulder.ibm.com/infocenter/db2luw/v9r5/topic/com.ibm.db2.luw.sql.ref.doc/doc/r0023457.html
@@ -246,6 +420,16 @@ class DatabaseOperations ( BaseDatabaseOperations ):
             
     # Function to extract time zone-aware day, month or day of week from timestamps   
     def datetime_extract_sql(self, lookup_type, sql, params, tzname):
+        valid_lookups = {
+            "year", "month", "day",
+            "hour", "minute", "second",
+            "week", "quarter", "dayofyear", "dayofweek", 
+            "week_day", "iso_week_day", "iso_year"
+        }
+    
+        if lookup_type not in valid_lookups:
+            raise ValueError(f"Invalid lookup_type for EXTRACT: {lookup_type!r}")
+    
         sql, params = self._convert_sql_to_tz(sql, params, tzname)
         return self.date_extract_sql(lookup_type, sql, params)
 
@@ -272,6 +456,13 @@ class DatabaseOperations ( BaseDatabaseOperations ):
     # Truncating the time zone-aware timestamps value on the basic of lookup type
     # Note: For zos we may need to modify this
     def datetime_trunc_sql(self, lookup_type, sql, params, tzname):
+        valid_lookups = {
+            "year", "quarter", "month", "week", "day",
+            "hour", "minute", "second"
+        }
+    
+        if lookup_type not in valid_lookups:
+            raise ValueError(f"Invalid lookup_type for TRUNC: {lookup_type!r}")
         return self.date_trunc_sql(lookup_type, sql, params, tzname)
 
     def time_trunc_sql(self, lookup_type, sql, params, tzname=None):
@@ -325,14 +516,7 @@ class DatabaseOperations ( BaseDatabaseOperations ):
     # Dropping auto generated property of the identity column.
     def drop_sequence_sql( self, table ):
         return "ALTER TABLE %s ALTER COLUMN ID DROP IDENTITY" % ( self.quote_name( table ) )
-    
-    #This function casts the field and returns it for use in the where clause
-    def field_cast_sql( self, db_type, internal_type=None ):
-        if db_type == 'CLOB':
-            return "VARCHAR(%s, 4096)"
-        else:
-            return " %s"
-        
+
     def fulltext_search_sql( self, field_name ):
         sql = "WHERE %s = ?" % field_name
         return sql
@@ -650,13 +834,20 @@ class DatabaseOperations ( BaseDatabaseOperations ):
             if sql.count("db2regexExtraField(%s)") > 0:
                 sql = sql.replace("db2regexExtraField(%s)", "")
                 
+            # Escape all % characters not part of a valid format specifier (like %s)
+            # So, we replace all lone % that aren't followed by 's' or other valid directives
+            sql = re.sub(r"%(?![sdifouxXeEgGcr])", "%%", sql)
             return sql % params
         else:
             return sql
 
     def limit_offset_sql(self, low_mark, high_mark):
-        fetch, offset = self._get_limit_offset_params(low_mark, high_mark)
-        return ' '.join(sql for sql in (
-            ('OFFSET %d ROWS' % offset) if offset else None,
-            ('FETCH FIRST %d ROWS ONLY' % fetch) if fetch else None,
-        ) if sql)
+        limit, offset = self._get_limit_offset_params(low_mark, high_mark)
+        if limit and offset:
+            return "LIMIT %d OFFSET %d" % (limit, offset)
+        elif limit:
+            return "LIMIT %d" % limit
+        elif offset:
+            return "OFFSET %d ROWS" % offset
+        else:
+            return ""

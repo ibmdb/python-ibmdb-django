@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2018.                                      |
+# | (C) Copyright IBM Corporation 2009-2026.                                 |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -13,7 +13,7 @@
 # | KIND, either express or implied. See the License for the specific        |
 # | language governing permissions and limitations under the License.        |
 # +--------------------------------------------------------------------------+
-# | Authors: Ambrish Bhargava, Tarun Pasrija, Rahul Priyadarshi              |
+# | Authors: IBM Application Development Team                                |
 # +--------------------------------------------------------------------------+
 
 """
@@ -52,6 +52,25 @@ def query_class( QueryClass ):
                     sql_sel = "SELECT DISTINCT"
 
                 sql_select_token = sql_split[0].split( "," )
+                
+                # rejoin items that use comma in a db function
+                new_sql_select_token = []
+                paren_count = 0
+                column_fragment = None
+                for column in sql_select_token:
+                    paren_count += column.count('(') - column.count(')')
+                    if paren_count > 0:
+                        if column_fragment:
+                            column_fragment = ', '.join([column_fragment, column])
+                        else:
+                            column_fragment = column
+                    elif paren_count == 0 and column_fragment:
+                        new_sql_select_token.append(', '.join([column_fragment, column]))
+                        column_fragment = None
+                    else:
+                        new_sql_select_token.append(column)
+                sql_select_token = new_sql_select_token
+                
                 i = 0
                 while ( i < len( sql_select_token ) ):
                     if sql_select_token[i].count( "TIMESTAMP(DATE(SUBSTR(CHAR(" ) == 1:
@@ -65,13 +84,30 @@ def query_class( QueryClass ):
                                         dummyVal, i + 1 )
                         i = i + 4
                         continue
+                                        
+                    token = sql_select_token[i]
+
+                    # 1) Quoted alias first: ... AS "alias"
+                    if ' AS "' in token:
+                        expr, alias_part = token.rsplit(' AS "', 1)
+                        alias = alias_part.strip()
+                        if alias.endswith('"'):
+                            alias = alias[:-1].strip()
+                        if alias:
+                            sql_pri = '%s %s,' % (sql_pri, token)
+                            sql_sel = '%s "%s",' % (sql_sel, alias)
+                            i = i + 1
+                            continue
                     
-                    if sql_select_token[i].count( " AS " ) == 1:
-                        temp_col_alias = sql_select_token[i].split( " AS " )
-                        sql_pri = '%s %s,' % ( sql_pri, sql_select_token[i] )
-                        sql_sel = "%s %s," % ( sql_sel, temp_col_alias[1] )
-                        i = i + 1
-                        continue
+                    # 2) Unquoted alias fallback: ... AS alias                
+                    if " AS " in token:
+                        expr, alias = token.rsplit(" AS ", 1)
+                        alias = alias.strip()
+                        if alias and not "(" in alias:
+                            sql_pri = '%s %s,' % (sql_pri, token)
+                            sql_sel = "%s %s," % (sql_sel, alias)
+                            i = i + 1
+                            continue
                 
                     sql_pri = '%s %s AS "%s%d",' % ( sql_pri, sql_select_token[i], dummyVal, i + 1 )
                     sql_sel = "%s \"%s%d\"," % ( sql_sel, dummyVal, i + 1 )
@@ -83,10 +119,10 @@ def query_class( QueryClass ):
                 sql = '%s, ( ROW_NUMBER() OVER() ) AS "%s" FROM ( %s ) AS M' % ( sql_sel, self.__rownum, sql_pri )
                 sql = '%s FROM ( %s ) Z WHERE' % ( sql_sel, sql )
                 
-                if self.low_mark is not 0:
+                if self.low_mark != 0:
                     sql = '%s "%s" > %d' % ( sql, self.__rownum, self.low_mark )
                     
-                if self.low_mark is not 0 and self.high_mark is not None:
+                if self.low_mark != 0 and self.high_mark is not None:
                     sql = '%s AND ' % ( sql )
 
                 if self.high_mark is not None:

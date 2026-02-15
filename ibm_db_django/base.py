@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2021.                                      |
+# | (C) Copyright IBM Corporation 2009-2026.                                 |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -13,7 +13,7 @@
 # | KIND, either express or implied. See the License for the specific        |
 # | language governing permissions and limitations under the License.        |
 # +--------------------------------------------------------------------------+
-# | Authors: Ambrish Bhargava, Tarun Pasrija, Rahul Priyadarshi              |
+# | Authors: IBM Application Development Team                                |
 # +--------------------------------------------------------------------------+
 
 """
@@ -80,6 +80,150 @@ if _IS_JYTHON:
     dbms_name = 'dbname'
 else:
     dbms_name = 'dbms_name'
+
+import datetime
+from django.db.models import DurationField, DateField, DateTimeField, TimeField, Value 
+from ibm_db_django.expressions import DurationValue
+from django.db.models.expressions import Combinable, CombinedExpression
+from django.db.models.expressions import TemporalSubtraction
+from django.db.models.expressions import DurationExpression
+
+from django.db.models.constraints import CheckConstraint
+from django.db.models.sql.query import Query
+from django.core.exceptions import SynchronousOnlyOperation
+
+def db2_safe_get_check_sql(self, model, schema_editor):
+    query = Query(model=model, alias_cols=False)    
+    where = query.build_where(self.condition)
+    compiler = query.get_compiler(connection=schema_editor.connection)
+    sql, params = where.as_sql(compiler, schema_editor.connection)
+    if params:
+        sql = sql % tuple(schema_editor.quote_value(p) for p in params)
+    return sql
+
+# Apply monkeypatch
+CheckConstraint._get_check_sql = db2_safe_get_check_sql
+
+# Backup original
+original_combinedexpression_as_sql = CombinedExpression.as_sql
+
+def db2_combinedexpression_as_sql(self, compiler, connection):
+    if connection.vendor == "DB2":
+        lhs_sql, lhs_params = compiler.compile(self.lhs)
+        rhs_sql, rhs_params = compiler.compile(self.rhs)
+
+        expressions = [lhs_sql, rhs_sql]
+        expression_wrapper = "(%s)"
+
+        # Let DB2-specific combine_expression handle it
+        sql = connection.ops.combine_expression(self, self.connector, expressions)
+        params = tuple(list(lhs_params) + list(rhs_params))
+        return expression_wrapper % sql, params
+
+    # Default fallback if not DB2
+    return original_combinedexpression_as_sql(self, compiler, connection)
+
+# Apply the monkey patch
+CombinedExpression.as_sql = db2_combinedexpression_as_sql
+
+original_durationexpression_as_sql = DurationExpression.as_sql
+
+def db2_durationexpression_as_sql(self, compiler, connection):
+    if connection.vendor == "DB2":
+        lhs_sql, lhs_params = self.compile(self.lhs, compiler, connection)
+        rhs_sql, rhs_params = self.compile(self.rhs, compiler, connection)        
+
+        # Fallback to normal combine_expression logic for non-temporal operands
+        expressions = [lhs_sql, rhs_sql]
+        expression_wrapper = "(%s)"
+        sql = connection.ops.combine_duration_expression(self, self.connector, expressions)
+        return expression_wrapper % sql, lhs_params + rhs_params
+
+    # Default fallback if not DB2
+    return original_durationexpression_as_sql(self, compiler, connection)
+
+# Apply the monkey patch
+DurationExpression.as_sql = db2_durationexpression_as_sql
+
+# Save the original to fallback
+original_temporal_subtraction_as_sql = TemporalSubtraction.as_sql
+
+def db2_temporal_subtraction_as_sql(self, compiler, connection):
+    if connection.vendor == "DB2":
+        # Compile once for NULL detection
+        lhs_sql, lhs_params = compiler.compile(self.lhs)
+        rhs_sql, rhs_params = compiler.compile(self.rhs)
+
+        if lhs_sql.strip().upper() == "NULL" or rhs_sql.strip().upper() == "NULL":
+            return "NULL", []
+
+        # Helper to wrap in CAST
+        def sql_part(func_name, expr):
+            expr_sql, expr_params = compiler.compile(expr)
+            casted = f"BIGINT({func_name}(CAST({expr_sql} AS TIMESTAMP)))"
+            return casted, tuple(expr_params)
+
+        lhs_field = getattr(self.lhs, "output_field", None)
+        rhs_field = getattr(self.rhs, "output_field", None)
+        
+        # Special logic for TimeField - TimeField (NO CAST)
+        if isinstance(lhs_field, TimeField) and isinstance(rhs_field, TimeField):
+            lhs_micro = f"(BIGINT(MIDNIGHT_SECONDS({lhs_sql})) * 1000000)"
+            rhs_micro = f"(BIGINT(MIDNIGHT_SECONDS(CAST({rhs_sql} AS TIME))) * 1000000)"
+            sql = f"({lhs_micro} - {rhs_micro})"
+            return sql, tuple(lhs_params) + tuple(rhs_params)   
+        
+        if isinstance(lhs_field, (DateField, DateTimeField, TimeField)) and \
+           isinstance(rhs_field, (DateField, DateTimeField, TimeField)):
+
+            lhs_days, lhs_days_params = sql_part("DAYS", self.lhs)
+            rhs_days, rhs_days_params = sql_part("DAYS", self.rhs)
+
+            lhs_secs, lhs_secs_params = sql_part("MIDNIGHT_SECONDS", self.lhs)
+            rhs_secs, rhs_secs_params = sql_part("MIDNIGHT_SECONDS", self.rhs)
+
+            lhs_micro, lhs_micro_params = sql_part("MICROSECOND", self.lhs)
+            rhs_micro, rhs_micro_params = sql_part("MICROSECOND", self.rhs)
+
+            sql = (
+                f"((({lhs_days} - {rhs_days}) * 86400 + "
+                f"({lhs_secs} - {rhs_secs})) * 1000000 + "
+                f"({lhs_micro} - {rhs_micro}))"
+            )
+
+            params = (
+                lhs_days_params + rhs_days_params +
+                lhs_secs_params + rhs_secs_params +
+                lhs_micro_params + rhs_micro_params
+            )
+
+            return sql, params
+
+    # Fallback to default
+    return original_temporal_subtraction_as_sql(self, compiler, connection)
+
+# Apply the patch
+TemporalSubtraction.as_sql = db2_temporal_subtraction_as_sql
+
+# Save the original method
+original_combine = Combinable._combine
+
+def db2_safe_combine(self, other, connector, reversed):
+    # Case 1: Raw datetime.timedelta object
+    if not hasattr(other, 'resolve_expression'):
+        if isinstance(other, datetime.timedelta):
+            other = DurationValue(other, output_field=DurationField())
+        else:
+            other = Value(other)
+    # Case 2: Its Value but wrapping a timedelta object
+    elif isinstance(other, Value) and isinstance(other.value, datetime.timedelta):
+        other = DurationValue(other.value, output_field=DurationField())
+    
+    if reversed:
+        return CombinedExpression(other, connector, self)
+    return CombinedExpression(self, connector, other)
+
+Combinable._combine = db2_safe_combine
 
 class DatabaseFeatures( BaseDatabaseFeatures ):
     can_use_chunked_reads = True
@@ -148,6 +292,22 @@ class DatabaseFeatures( BaseDatabaseFeatures ):
     supports_json_field_contains = False
     supports_temporal_subtraction = True
     allows_group_by_select_index = False
+    supports_json_field = False
+    # Does the backend support stored generated columns?
+    supports_stored_generated_columns = False
+
+    # Does the backend support virtual generated columns?
+    supports_virtual_generated_columns = True
+    # Does the backend support column and table comments?
+    supports_comments = True
+    # Does the backend support column comments in ADD COLUMN statements?
+    supports_comments_inline = False
+    
+    # Does the backend support column collations?
+    supports_collation_on_charfield = False
+    supports_collation_on_textfield = False
+    # Does the backend support non-deterministic collations?
+    supports_non_deterministic_collations = False
 
     @cached_property
     def introspected_field_types(self):
@@ -198,11 +358,11 @@ class DatabaseWrapper( BaseDatabaseWrapper ):
         "iendswith":    "LIKE UPPER(%s) ESCAPE '\\'",
     }
 
-    pattern_esc = r"REPLACE(REPLACE(REPLACE({}, '\', '\\'), '%%', '\%%'), '_', '\_')"
+    pattern_esc = r"REPLACE(REPLACE(REPLACE({}, '\', '\\'), '%', '\%'), '_', '\_')"
     pattern_ops = {
-        'contains': r"LIKE '%%' || {} || '%%' ESCAPE '\'",
-        'icontains': r"LIKE '%%' || UPPER({}) || '%%' ESCAPE '\'",
-        'startswith': r"LIKE {} || '%%' ESCAPE '\'",
+        'contains': r"LIKE '%' || {} || '%' ESCAPE '\'",
+        'icontains': r"LIKE '%' || UPPER({}) || '%' ESCAPE '\'",
+        'startswith': r"LIKE {} || '%' ESCAPE '\'",
         'istartswith': r"LIKE UPPER({}) || '%%' ESCAPE '\'",
         'endswith': r"LIKE '%%' || {} ESCAPE '\'",
         'iendswith': r"LIKE '%%' || UPPER({}) ESCAPE '\'",
@@ -242,7 +402,29 @@ class DatabaseWrapper( BaseDatabaseWrapper ):
         else:
             self.validation = DatabaseValidation( self )
         self.databaseWrapper = Base.DatabaseWrapper()
+        
+        # IBM DB2 version 11.1 suports natively LIMIT/OFFSET - see #112
+        self._supports_limit_offset = None
 
+    @property
+    def supports_limit_offset(self):
+        """
+        Check if server supports LIMIT/OFFSET
+        Lazily initialized to avoid sync operations in async contexts
+        """
+        if self._supports_limit_offset is None:
+            try:
+                version = self.get_server_version()
+                self._supports_limit_offset = (version[:2] >= (11, 1))
+            except SynchronousOnlyOperation:
+                # In async context, assume modern version
+                self._supports_limit_offset = True
+            except Exception as e:
+                # Fallback to safe default
+                self._supports_limit_offset = True
+        
+        return self._supports_limit_offset
+    
     # Method to check if connection is live or not.
     def __is_connection( self ):
         return self.connection is not None
@@ -393,7 +575,21 @@ class DatabaseWrapper( BaseDatabaseWrapper ):
         if( djangoVersion[0:2] >= ( 1, 5 ) ):
             self.validate_thread_sharing()
 
-        self._close()
+        self.run_on_commit = []  # Clear all pending on_commit hooks
+
+        # Don't call validate_no_atomic_block() to avoid making it difficult
+        # to get rid of a connection in an invalid state. The next connect()
+        # will reset the transaction state anyway.
+        if self.closed_in_transaction or self.connection is None:
+            return
+        try:
+            self._close()
+        finally:
+            if self.in_atomic_block:
+                self.closed_in_transaction = True
+                self.needs_rollback = True
+            else:
+                self.connection = None
 
     def get_server_version( self ):
         if not self.connection:
@@ -426,7 +622,7 @@ class DatabaseWrapper( BaseDatabaseWrapper ):
                 each_query_split = each_query[0].split()
                 cursor.execute("select enforced from syscat.tabconst where tabname='%s' and constname='%s'" % (each_query_split[2].upper(), each_query_split[6].upper()))
                 enforced = cursor.fetchall()
-                if enforced[0][0] != 'N':
+                if enforced and enforced[0][0] != 'N':
                     cursor.execute(each_query[0])
 
 
@@ -460,7 +656,7 @@ class DatabaseWrapper( BaseDatabaseWrapper ):
                     each_query_split = each_query[0].split()
                     cursor.execute("select enforced from syscat.tabconst where tabname='%s' and constname='%s'" % (each_query_split[2].upper(), each_query_split[6].upper()))
                     enforced = cursor.fetchall()
-                    if enforced[0][0] != 'Y':
+                    if enforced and enforced[0][0] != 'Y':
                         cursor.execute(each_query[0])
 
             cursor = self.cursor()

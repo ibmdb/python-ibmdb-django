@@ -1,5 +1,10 @@
 Change Log
 =============
+2026/02/15
+-Added Support for Python3.13
+-Added Support for Django5.2
+-Update version to 1.6.0.0
+
 2023/10/06
 -Added Support for Python3.11.4
 -Added Support for Django4.2
