@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2021.                                      |
+# | (C) Copyright IBM Corporation 2009-2026.                                 |
 # +--------------------------------------------------------------------------+
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
 # | you may not use this file except in compliance with the License.         |
@@ -12,9 +12,10 @@
 # | KIND, either express or implied. See the License for the specific        |
 # | language governing permissions and limitations under the License.        |
 # +--------------------------------------------------------------------------+
-# | Authors: Ambrish Bhargava, Tarun Pasrija, Rahul Priyadarshi              |
+# | Authors: IBM Application Development Team                                |
 # +--------------------------------------------------------------------------+
 
+import os
 import sys
 
 _IS_JYTHON = sys.platform.startswith('java')
@@ -33,12 +34,12 @@ setup (
     license           = LICENSE,
     platforms         = 'All',
     install_requires  = _IS_JYTHON and ['django==2.2']
-                         or ['ibm_db>=3.0.1', 'django>=4.2', 'six', 'regex'],
+                         or ['ibm_db>=3.0.1', 'django>=5.2', 'six', 'regex'],
     dependency_links  = _IS_JYTHON and ['http://pypi.python.org/pypi/Django/'] or ['http://pypi.python.org/pypi/ibm_db/',
                           'http://pypi.python.org/pypi/Django/'],
     description       = 'DB2 support for Django framework.',
     long_description  = open(readme).read(),
-    author            = 'Praveen Narayanappa',
+    author            = 'IBM Application Development Team',
     author_email      = 'praveen.narayanappa1@ibm.com',
     maintainer        = 'Db2Connect Driver Development Team',
     maintainer_email  = 'bimal.jha1@ibm.com',

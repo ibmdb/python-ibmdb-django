@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2021.                                      |
+# | (C) Copyright IBM Corporation 2009-2026.                                 |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -13,7 +13,7 @@
 # | KIND, either express or implied. See the License for the specific        |
 # | language governing permissions and limitations under the License.        |
 # +--------------------------------------------------------------------------+
-# | Authors: Ambrish Bhargava, Tarun Pasrija, Rahul Priyadarshi              |
+# | Authors: IBM Application Development Team                                |
 # +--------------------------------------------------------------------------+
 #from builtins import True
 from _ast import Or
@@ -215,6 +215,8 @@ class DB2CursorWrapper( Database.Cursor ):
             for m in regex.finditer(pattern, operation):
                 end = m.end()
                 p_start = len(op_temp)
+                if end <= p_start:
+                    continue
                 prev_str = operation[p_start:end-1]
                 op_temp = op_temp + prev_str
                 op_temp_wParam = op_temp_wParam + prev_str
@@ -235,7 +237,6 @@ class DB2CursorWrapper( Database.Cursor ):
                         parameters = parameters[:parm_count] + parameters[(parm_count+1):]
                     op_temp_wParam = op_temp_wParam + str_wp
                     op_temp = op_temp + next_str[start:end]
-                    remg = end
                     break
 
             p_start = len(op_temp)
@@ -275,6 +276,27 @@ class DB2CursorWrapper( Database.Cursor ):
 
         return parameters, operation
 
+    def _rewrite_default_params(self, query: str, params: list):
+        """
+        Replace %s with DEFAULT when a param equals 'DEFAULT'.
+        Returns (query, new_params).
+        """
+        new_params = []
+        parts = query.split("%s")
+        new_query = parts[0]
+    
+        for i, param in enumerate(params):
+            if i < len(parts) - 1:
+                if isinstance(param, str) and param.upper() == "DEFAULT":
+                    # Inline DEFAULT into SQL
+                    new_query += "DEFAULT" + parts[i + 1]
+                else:
+                    # Keep %s placeholder and param
+                    new_query += "%s" + parts[i + 1]
+                    new_params.append(param)
+    
+        return new_query, new_params
+        
     # Over-riding this method to modify SQLs which contains format parameter to qmark. 
     def execute( self, operation, parameters = () ):
         if( djangoVersion[0:2] >= (2 , 0)):
@@ -296,6 +318,8 @@ class DB2CursorWrapper( Database.Cursor ):
                 parameters, operation = self._resolve_parameters_in_aggregator_func(parameters, operation, ['COALESCE'], r'(COALESCE)\ *\(')
                 parameters, operation = self._format_parameters( parameters, operation )
                 parameters, operation = self._resolve_parameters_in_expression_func( parameters, operation )
+                if any(isinstance(p, str) and p.upper() == "DEFAULT" for p in parameters):
+                    operation, parameters = self._rewrite_default_params(operation, parameters) 
                 if operation.count( "%s" ) > 0:
                     operation = operation.replace("%s", "?")
                 
@@ -407,7 +431,10 @@ class DB2CursorWrapper( Database.Cursor ):
                 index = index + 1
                 if ( desc[1] == Database.DATETIME ):
                     if settings.USE_TZ and value is not None and timezone.is_naive( value ):
-                        value = value.replace( tzinfo=timezone.utc )
+                        if ( djangoVersion[0:2] >= (5, 0 ) ):
+                            value = value.replace( tzinfo=datetime.timezone.utc )
+                        else:
+                            value = value.replace( tzinfo=timezone.utc )
                         row[index] = value
                 elif ( djangoVersion[0:2] >= (1, 5 ) ):
                     if isinstance(value, six.string_types):

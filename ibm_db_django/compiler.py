@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2021.                                      |
+# | (C) Copyright IBM Corporation 2009-2026.                                 |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -13,12 +13,12 @@
 # | KIND, either express or implied. See the License for the specific        |
 # | language governing permissions and limitations under the License.        |
 # +--------------------------------------------------------------------------+
-# | Authors: Ambrish Bhargava, Tarun Pasrija, Rahul Priyadarshi              |
+# | Authors: IBM Application Development Team                                |
 # +--------------------------------------------------------------------------+
 
 from django.db.models.sql import compiler
 import sys
-from django.db.models.functions.comparison import JSONObject
+from django.db.models.functions.json import JSONObject
 
 if sys.version_info >= (3, ):
     try:
@@ -38,6 +38,14 @@ from django.db.utils import DatabaseError
 from django.db.models.functions import Cast, Random, Pi
 from django import VERSION as djangoVersion
 
+from django.db.models.fields.tuple_lookups import TupleIn, TupleExact, Tuple
+from django.db.models.expressions import Subquery, ColPairs, Col
+from django.db.models.sql.query import Query
+
+from django.db.models.functions import Log, Ln
+from django.db.models.expressions import ExpressionWrapper, F
+from django.db.models import FloatField
+from django.db.models.functions import MD5
 FORCE = object()
 
 class PiDB2(Pi):
@@ -80,7 +88,164 @@ class FuncDB2(Func):
 class SQLCompiler( compiler.SQLCompiler ):
     __rownum = 'Z.__ROWNUM'
 
+    def handle_tuple_in(self, node):
+        """
+        Convert TupleIn with ColPairs or Tuple(lhs) into DB2-compatible OR clauses.
+        Handles both literal RHS lists and subqueries, plus PK/FK heuristics.
+        """
+        alias = getattr(node.lhs, 'alias', None)
+        fields = getattr(node.lhs, 'targets', None)  # ColPairs case
+        values = node.rhs
+    
+        # Heuristic: check if LHS fields look like PK or FK
+        def looks_like_pk_or_fk(field):
+            col = getattr(field, "attname", "") or getattr(field, "column", "")
+            return col == "id" or col.endswith("_id")
+    
+        all_fields_look_like_keys = bool(fields) and all(looks_like_pk_or_fk(f) for f in fields)
+    
+        # Compile LHS into parts
+        def compile_lhs_parts():
+            if fields and alias:
+                # ColPairs case
+                parts_sql = [
+                    f"{self.quote_name_unless_alias(alias)}."
+                    f"{self.connection.ops.quote_name(field.column)}"
+                    for field in fields
+                ]
+                return parts_sql, []
+            # Generic Tuple(lhs) case
+            source_exprs = getattr(node.lhs, 'source_expressions', None)
+            if source_exprs:
+                parts_sql, parts_params = [], []
+                for expr in source_exprs:
+                    s, p = self.compile(expr)
+                    parts_sql.append(s)
+                    parts_params.extend(p)
+                return parts_sql, parts_params
+            # Fallback: treat lhs as single col
+            s, p = self.compile(node.lhs)
+            return [s], p
+    
+        # 1) Empty RHS → always false (special case: PK/FK fields)
+        if isinstance(values, (list, tuple)) and not values:
+            return "1=0", []
+    
+        # 2) Subquery RHS: keep tuple form
+        if isinstance(values, (Subquery, Query)):
+            lhs_parts_sql, lhs_parts_params = compile_lhs_parts()
+            lhs_sql = "(" + ", ".join(lhs_parts_sql) + ")"
+            subquery_sql, subquery_params = self.compile(values)
+            return f"{lhs_sql} IN ({subquery_sql})", lhs_parts_params + list(subquery_params)
+    
+        # 3) Literal list/tuple RHS
+        if isinstance(values, (list, tuple)):
+            # Filter out tuples containing NULL — DB2 can't match NULL with '='
+            valid_values = [tup for tup in values if not (isinstance(tup, (list, tuple)) and None in tup)]
+            if not valid_values:
+                # All tuples have NULL and these look like pk/fk columns
+                if all_fields_look_like_keys:
+                    sql, params = node.as_sql(self, self.connection)
+                    return sql, params
+                else:
+                    return "1=0", []  # Still safe default
+    
+            lhs_parts_sql, lhs_parts_params = compile_lhs_parts()
+            arity = len(lhs_parts_sql)
+    
+            # Build OR-of-AND comparisons
+            conditions = []
+            params = []
+            for val_tuple in valid_values:
+                if not isinstance(val_tuple, (list, tuple)):
+                    val_tuple = (val_tuple,)
+                if len(val_tuple) != arity:
+                    return "1=0", []
+                sub_cond = " AND ".join(f"{lhs_parts_sql[i]} = %s" for i in range(arity))
+                conditions.append("(" + sub_cond + ")")
+                params.extend(val_tuple)
+    
+            sql = "(" + " OR ".join(conditions) + ")"
+            return sql, lhs_parts_params + params
+    
+        # 4) Unsupported RHS
+        return "1=0", []
+
+    def handle_tuple_exact_subquery(self, node):
+        alias = node.lhs.alias
+        fields = node.lhs.targets
+        subquery = node.rhs
+    
+        if not isinstance(subquery, (Subquery, Query)):
+            raise TypeError(f"TupleExact: unsupported rhs type {type(subquery)}")
+    
+        q = subquery.query if isinstance(subquery, Subquery) else subquery
+        select_list = q.select
+    
+        # Expecting a single ColPairs object
+        if len(select_list) != 1 or not hasattr(select_list[0], 'targets'):
+            raise ValueError("TupleExact: expected single ColPairs in subquery SELECT")
+    
+        rhs_expressions = select_list[0].targets  # This gives list of Col()s
+    
+        if len(rhs_expressions) != len(fields):
+            raise ValueError(
+                f"TupleExact: subquery returns {len(rhs_expressions)} columns, "
+                f"but {len(fields)} fields are being compared."
+            )
+    
+        conditions = []
+        params = []
+    
+        for field, rhs_field in zip(fields, rhs_expressions):
+            # LHS: compile the local field
+            lhs_expr = Col(alias, field)
+            lhs_sql, lhs_params = self.compile(lhs_expr)
+        
+            # RHS: build a Col pointing to the subquery's alias and field
+            rhs_alias = q.alias_map.keys().__iter__().__next__()  # usually 'U0'
+            rhs_col_expr = Col(rhs_alias, rhs_field)
+        
+            # Create a new subquery selecting only the right column
+            q_clone = q.clone()
+            q_clone.select = (rhs_col_expr,)
+            q_clone.select_related = False
+            q_clone.group_by = None
+            q_clone.order_by = ()
+            q_clone.low_mark = 0
+            q_clone.high_mark = 1
+        
+            subq_sql, subq_params = self.compile(q_clone)
+        
+            conditions.append(f"{lhs_sql} = ({subq_sql})")
+            params.extend(lhs_params)
+            params.extend(subq_params)
+    
+        return " AND ".join(conditions), params
+
+
     def compile(self, node):
+        if isinstance(node, Log):
+            # Rewrite LOG(x, base) -> LN(x) / LN(base)
+            base = node.source_expressions[0]
+            lhs = node.source_expressions[1]
+    
+            ln_x = Ln(lhs)
+            ln_base = Ln(base)
+            expr = ExpressionWrapper(ln_x / ln_base, output_field=FloatField())
+            return self.compile(expr)
+    
+        if isinstance(node, MD5):
+            sql, params = self.compile(node.source_expressions[0])
+            return f'HEX(HASH_SHA256({sql}))', params
+
+        # Handle TupleIn: rewrite (col1, col2) IN ((1,1),(1,2)) into DB2-safe OR conditions
+        if isinstance(node, TupleIn):
+            return self.handle_tuple_in(node)
+    
+        if isinstance(node, TupleExact) and isinstance(node.rhs, Query):
+            return self.handle_tuple_exact_subquery(node)
+    
         vendor_impl = getattr(node, 'as_' + self.connection.vendor, None)
         if vendor_impl:
             sql, params = vendor_impl(self, self.connection)
@@ -99,6 +264,14 @@ class SQLCompiler( compiler.SQLCompiler ):
                 sql, params = node.as_sql(self, self.connection)
         return sql, params
 
+    def _move_for_update_sql_to_end(self, sql):
+        if sql.find(' WITH RS USE AND KEEP UPDATE LOCKS') != -1:
+            sql = sql.replace(' WITH RS USE AND KEEP UPDATE LOCKS','')
+            sql = sql + (' WITH RS USE AND KEEP UPDATE LOCKS')
+        if sql.count( "%%s" ) > 0:
+            sql = sql.replace("%%s", "%s")
+        return sql
+    
     # To get ride of LIMIT/OFFSET problem in DB2, this method has been implemented.
     def as_sql( self, with_limits=True, with_col_aliases=False, subquery=False ):
         self.subquery = subquery
@@ -114,19 +287,19 @@ class SQLCompiler( compiler.SQLCompiler ):
                     if fieldType == 'TextField':
                         self.query.distinct = False
                         break
-        if not ( with_limits and ( self.query.high_mark is not None or self.query.low_mark ) ):
-            sql, params = super( SQLCompiler, self ).as_sql( False, with_col_aliases )
-            if sql.find(' WITH RS USE AND KEEP UPDATE LOCKS') != -1:
-                sql = sql.replace(' WITH RS USE AND KEEP UPDATE LOCKS','')
-                sql = sql + (' WITH RS USE AND KEEP UPDATE LOCKS')
+        
+        if self.connection.supports_limit_offset:
+            # IBM DB2 version 11.1 supports natively LIMIT/OFFSET (see #112), 
+            # thus no need for special logic -> use standard django sql construction logic 
+            sql, params = super( SQLCompiler, self ).as_sql( with_limits=with_limits, with_col_aliases=with_col_aliases )
+            sql = self._move_for_update_sql_to_end(sql)
+        elif not ( with_limits and ( self.query.high_mark is not None or self.query.low_mark ) ):
+            sql, params = super( SQLCompiler, self ).as_sql( with_limits=False, with_col_aliases=with_col_aliases )
+            sql = self._move_for_update_sql_to_end(sql)            
             return sql, params
         else:
-            sql_ori, params = super( SQLCompiler, self ).as_sql( False, with_col_aliases )
-            if sql_ori.find(' WITH RS USE AND KEEP UPDATE LOCKS') != -1:
-                sql_ori = sql_ori.replace(' WITH RS USE AND KEEP UPDATE LOCKS','')
-                sql_ori = sql_ori + (' WITH RS USE AND KEEP UPDATE LOCKS')
-            if sql_ori.count( "%%s" ) > 0:
-                sql_ori = sql_ori.replace("%%s", "%s")
+            sql_ori, params = super( SQLCompiler, self ).as_sql( with_limits=False, with_col_aliases=with_col_aliases )
+            sql_ori = self._move_for_update_sql_to_end(sql_ori)            
             if self.query.low_mark == 0:
                 return sql_ori + " FETCH FIRST %s ROWS ONLY" % ( self.query.high_mark ), params
             sql_split = sql_ori.split( " FROM " )
@@ -146,6 +319,25 @@ class SQLCompiler( compiler.SQLCompiler ):
                 sql_sel = "SELECT DISTINCT"
 
             sql_select_token = sql_split[0].split( "," )
+            
+            # rejoin items that use comma in a db function
+            new_sql_select_token = []
+            paren_count = 0
+            column_fragment = None
+            for column in sql_select_token:
+                paren_count += column.count('(') - column.count(')')
+                if paren_count > 0:
+                    if column_fragment:
+                        column_fragment = ', '.join([column_fragment, column])
+                    else:
+                        column_fragment = column
+                elif paren_count == 0 and column_fragment:
+                    new_sql_select_token.append(', '.join([column_fragment, column]))
+                    column_fragment = None
+                else:
+                    new_sql_select_token.append(column)
+            sql_select_token = new_sql_select_token
+            
             i = 0
             first_field_no = 0
             while ( i < len( sql_select_token ) ):
@@ -161,12 +353,29 @@ class SQLCompiler( compiler.SQLCompiler ):
                     i = i + 4
                     continue
 
-                if sql_select_token[i].count( " AS " ) == 1:
-                    temp_col_alias = sql_select_token[i].split( " AS " )
-                    sql_pri = '%s %s,' % ( sql_pri, sql_select_token[i] )
-                    sql_sel = "%s %s," % ( sql_sel, temp_col_alias[1] )
-                    i = i + 1
-                    continue
+                token = sql_select_token[i]
+
+                # 1) Quoted alias first: ... AS "alias"
+                if ' AS "' in token:
+                    expr, alias_part = token.rsplit(' AS "', 1)
+                    alias = alias_part.strip()
+                    if alias.endswith('"'):
+                        alias = alias[:-1].strip()
+                    if alias:
+                        sql_pri = '%s %s,' % (sql_pri, token)
+                        sql_sel = '%s "%s",' % (sql_sel, alias)
+                        i = i + 1
+                        continue
+                
+                # 2) Unquoted alias fallback: ... AS alias                
+                if " AS " in token:
+                    expr, alias = token.rsplit(" AS ", 1)
+                    alias = alias.strip()
+                    if alias and not "(" in alias:
+                        sql_pri = '%s %s,' % (sql_pri, token)
+                        sql_sel = "%s %s," % (sql_sel, alias)
+                        i = i + 1
+                        continue
 
                 sql_pri = '%s %s AS "%s%d",' % ( sql_pri, sql_select_token[i], dummyVal, i + 1 )
                 sql_sel = "%s \"%s%d\"," % ( sql_sel, dummyVal, i + 1 )
@@ -316,7 +525,11 @@ class SQLCompiler( compiler.SQLCompiler ):
                         children[index] = tuple( node )
 
 class SQLInsertCompiler( compiler.SQLInsertCompiler, SQLCompiler ):
-    pass
+    def prepare_value(self, field, value):
+        if value is None and not field.null and field.default is None:
+            # Field is NOT NULL, no default in Python, but we got None → must fallback to DB2 DEFAULT
+            return self.connection.ops.insert_default_sql()
+        return super().prepare_value(field, value)
 
 class SQLDeleteCompiler( compiler.SQLDeleteCompiler, SQLCompiler ):
     pass

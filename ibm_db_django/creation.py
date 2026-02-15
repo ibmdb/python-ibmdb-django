@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2021.                                      |
+# | (C) Copyright IBM Corporation 2009-2026.                                 |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -13,7 +13,7 @@
 # | KIND, either express or implied. See the License for the specific        |
 # | language governing permissions and limitations under the License.        |
 # +--------------------------------------------------------------------------+
-# | Authors: Ambrish Bhargava, Tarun Pasrija, Rahul Priyadarshi              |
+# | Authors: IBM Application Development Team                                |
 # +--------------------------------------------------------------------------+
 
 import sys
@@ -35,12 +35,16 @@ from django.conf import settings
 from django.core.management import call_command
 from django import VERSION as djangoVersion
 from django.db.backends.utils import truncate_name
+from django.apps import apps
 
 if _IS_JYTHON:
     dbms_name = 'dbname'
 else:
     dbms_name = 'dbms_name'
-TEST_DBNAME_PREFIX = 'test_'
+
+# The prefix to put on the default database name when creating
+# the test database.
+TEST_DATABASE_PREFIX = "t_"
 
 class DatabaseCreation ( BaseDatabaseCreation ):
     psudo_column_prefix = 'psudo_'
@@ -156,6 +160,17 @@ class DatabaseCreation ( BaseDatabaseCreation ):
                         "%s;" % tablespace_sql] )
                         
         return output
+
+    def _get_test_db_name(self):
+        """
+        Internal implementation - return the name of the test DB that will be
+        created. Only useful when called from create_test_db() and
+        _create_test_db() and when no external munging is done with the 'NAME'
+        settings.
+        """
+        if self.connection.settings_dict["TEST"]["NAME"]:
+            return self.connection.settings_dict["TEST"]["NAME"]
+        return TEST_DATABASE_PREFIX + self.connection.settings_dict["NAME"]
     
     # Method to create and return test database, before creating test database it takes confirmation from user. 
     # If test database already exists then it takes confirmation from user to recreate that database .
@@ -165,8 +180,8 @@ class DatabaseCreation ( BaseDatabaseCreation ):
         kwargs = self.__create_test_kwargs()
         if not _IS_JYTHON:
             old_database = kwargs['database']
-            max_db_name_length = self.connection.ops.max_db_name_length()
-            kwargs['database'] = truncate_name( "%s%s" % ( TEST_DBNAME_PREFIX, old_database ), max_db_name_length )
+            max_db_name_length = self.connection.ops.max_db_name_length()            
+            kwargs['database'] = self._get_test_db_name()
             kwargsKeys = list(kwargs.keys())
             if ( kwargsKeys.__contains__( 'port' ) and 
                     kwargsKeys.__contains__( 'host' ) ):
@@ -254,7 +269,17 @@ class DatabaseCreation ( BaseDatabaseCreation ):
                 call_command( 'syncdb', database = self.connection.alias, verbosity = verbosity, interactive = False, load_initial_data = False )
             else:
                 if(djangoVersion[0:2] >= (2 , 0)):
-                    call_command( 'migrate', database = self.connection.alias, verbosity = verbosity, interactive = False)
+                    try:
+                        if self.connection.settings_dict["TEST"]["MIGRATE"] is False:
+                            # Disable migrations for all apps.
+                            old_migration_modules = settings.MIGRATION_MODULES
+                            settings.MIGRATION_MODULES = {
+                                app.label: None for app in apps.get_app_configs()
+                            }
+                        call_command( 'migrate', database = self.connection.alias, verbosity = verbosity, interactive = False, run_syncdb=True)
+                    finally:
+                        if self.connection.settings_dict["TEST"]["MIGRATE"] is False:
+                            settings.MIGRATION_MODULES = old_migration_modules
                     if serialize:
                         self.connection._test_serialized_contents = self.serialize_db_to_string()
                 else:
@@ -264,16 +289,14 @@ class DatabaseCreation ( BaseDatabaseCreation ):
         return test_database
     
     # Method to destroy database. For Jython nothing is getting done over here.
-    def destroy_test_db(self, old_database_name=None, verbosity=1, keepdb=False, suffix=None):
-        print ("Destroying Database...")
+    def destroy_test_db(self, old_database_name=None, verbosity=1, keepdb=False, suffix=None):        
         if not _IS_JYTHON:
             kwargs = self.__create_test_kwargs()
             if( old_database_name != kwargs.get( 'database' ) ):
                 kwargsKeys = list(kwargs.keys())
                 if ( kwargsKeys.__contains__( 'port' ) and 
                     kwargsKeys.__contains__( 'host' ) ):
-                    kwargs['dsn'] = "DATABASE=%s;HOSTNAME=%s;PORT=%s;PROTOCOL=TCPIP;" % ( 
-                             kwargs.get( 'database' ),
+                    kwargs['dsn'] = "attach=true;HOSTNAME=%s;PORT=%s;PROTOCOL=TCPIP;" % ( 
                              kwargs.get( 'host' ),
                              kwargs.get( 'port' )
                     )
@@ -283,7 +306,11 @@ class DatabaseCreation ( BaseDatabaseCreation ):
                     del kwargs['port']
                 if verbosity > 1:
                     print(("Droping Test Database %s" % ( kwargs.get( 'database' ) )))
-                Database.dropdb( **kwargs )
+                if not keepdb:
+                    print ("Destroying Database...")
+                    return_value = Database.dropdb( **kwargs )
+                    if return_value:
+                        print("Database %s dropped" % ( kwargs.get( 'database' ) ))
                 
             if( djangoVersion[0:2] <= ( 1, 1 ) ):
                 settings.DATABASE_NAME = old_database_name

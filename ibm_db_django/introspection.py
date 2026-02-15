@@ -1,7 +1,7 @@
 # +--------------------------------------------------------------------------+
 # |  Licensed Materials - Property of IBM                                    |
 # |                                                                          |
-# | (C) Copyright IBM Corporation 2009-2021.                                      |
+# | (C) Copyright IBM Corporation 2009-2026.                                 |
 # +--------------------------------------------------------------------------+
 # | This module complies with Django 1.0 and is                              |
 # | Licensed under the Apache License, Version 2.0 (the "License");          |
@@ -13,7 +13,7 @@
 # | KIND, either express or implied. See the License for the specific        |
 # | language governing permissions and limitations under the License.        |
 # +--------------------------------------------------------------------------+
-# | Authors: Ambrish Bhargava, Tarun Pasrija, Rahul Priyadarshi              |
+# | Authors: IBM Application Development Team                                |
 # +--------------------------------------------------------------------------+
 from collections import namedtuple
 import sys
@@ -30,10 +30,9 @@ if not _IS_JYTHON:
 else:
     from com.ziclix.python.sql import zxJDBC
 
-try:
-    from django.db.backends import BaseDatabaseIntrospection, FieldInfo
-except ImportError:
-    from django.db.backends.base.introspection import BaseDatabaseIntrospection, FieldInfo
+from django.db.backends.base.introspection import BaseDatabaseIntrospection
+from django.db.backends.base.introspection import FieldInfo as BaseFieldInfo
+FieldInfo = namedtuple("FieldInfo", BaseFieldInfo._fields + ("comment",))
 
 from django import VERSION as djangoVersion
 
@@ -111,14 +110,14 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
 
     # Getting the list of all tables, which are present under current schema.
     def get_table_list ( self, cursor ):
-        TableInfo = namedtuple('TableInfo', ['name', 'type'])
+        TableInfo = namedtuple('TableInfo', ['name', 'type', 'comment'])
         table_list = []
         if not _IS_JYTHON:
             for table in cursor.connection.tables( cursor.connection.get_current_schema() ):
                 if( djangoVersion[0:2] < ( 1, 8 ) ):
                     table_list.append( table['TABLE_NAME'].lower() )
                 else:
-                    table_list.append(TableInfo( table['TABLE_NAME'].lower(),'t' if table['TABLE_TYPE'] == 'TABLE' else 'v'))
+                    table_list.append(TableInfo( table['TABLE_NAME'].lower(),'t' if table['TABLE_TYPE'] == 'TABLE' else 'v', table['REMARKS']))
         else:
             cursor.execute( "select current_schema from sysibm.sysdummy1" )
             schema = cursor.fetchone()[0]
@@ -267,6 +266,14 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                 table_type = table_type[0]
 
         if table_type != 'X':
+            # Fetch all column comments AND defaults in one go            
+            sql = "SELECT COLNAME, REMARKS, DEFAULT FROM SYSCAT.COLUMNS WHERE TABSCHEMA = '%(schema)s' AND TABNAME = '%(table)s'" % {
+                    'schema': schema.upper(),
+                    'table': table_name.upper()
+                    }
+            cursor.execute(sql)
+            column_metadata = {row[0].lower(): {"comment": row[1], "default": row[2]} for row in cursor.fetchall()}
+            
             cursor.execute( "SELECT * FROM %s FETCH FIRST 1 ROWS ONLY" % qn( table_name ) )
             return [
                 FieldInfo(
@@ -277,8 +284,9 @@ class DatabaseIntrospection( BaseDatabaseIntrospection ):
                     desc[4], #precision
                     desc[5], #scale
                     desc[6], #null_ok
-                    None,    #default
+                    column_metadata.get(desc[0].lower(), {}).get("default"),  #default
                     None,    #collation
+                    column_metadata.get(desc[0].lower(), {}).get("comment"),  # comment                    
                     ) for desc in cursor.description ]
 
         return description
